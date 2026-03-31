@@ -1,57 +1,61 @@
-# Codatta DID × Ethereum ERC Integration Demo
+# Codatta DID × ERC-8004 × x402 Integration Demo
 
-Codatta DID 与 ERC-8004 (Trustless Agents)、ERC-8183 (Agentic Commerce) 的集成 Demo，展示 Agent 在 Ethereum 生态中的完整生命周期：注册身份 → 接受任务 → 执行工作 → 验收结算 → 链上验证 → 信誉评价。
+Codatta DID 与 ERC-8004 (Trustless Agents)、x402 (HTTP-native Payments) 的集成 Demo。以数据标注服务为业务场景，展示 Agent 自动发现、接单、执行、结算的完整工作流。
 
-## 各标准角色
+## 架构
 
-| 标准 | 定位 |
+```
+Client Agent                          Provider Agent
+     │                                      │
+     │  1. 从 ERC-8004 发现 Agent            │  注册 Codatta DID
+     │     读取注册文件、信誉                  │  注册 ERC-8004 身份
+     │                                      │  双向关联 DID ↔ ERC-8004
+     │  2. POST /annotate                   │  启动 HTTP 标注服务
+     │ ────────────────────────────────────→ │
+     │                                      │  执行标注（模拟）
+     │  3. 返回标注结果 + feedbackAuth        │  更新链上 Validation
+     │ ←──────────────────────────────────── │
+     │                                      │
+     │  4. 提交 Reputation 评价              │
+     │                                      │
+```
+
+| 标准 | 用途 |
 |------|------|
-| **Codatta DID** | 独立身份系统，标识用户和 Agent |
-| **ERC-8004** | Agent 发现与信任层（Identity + Reputation + Validation Registry） |
-| **ERC-8183** | 任务市场 + 任务级结算（Client-Provider-Evaluator） |
+| **Codatta DID** | Agent 的独立身份标识 |
+| **ERC-8004** | Agent 发现（Identity Registry）+ 信誉（Reputation）+ 验证（Validation） |
+| **x402** | HTTP 原生支付（当前 demo 为 mock 模式，部署测试网后接入真实 facilitator） |
 
 ## 项目结构
 
 ```
-src/                              # Solidity 合约
-├── erc8004/                      # ERC-8004 三大 Registry
-├── erc8183/                      # ERC-8183 任务市场 + Codatta Hook
-├── mock/                         # MockERC20 测试 Token
-└── AppCode.sol                   # ERC-8021 AppCode Tracker（可选）
-
-test/
-└── DemoIntegration.t.sol         # 全流程集成测试
+src/
+├── did/              # Codatta DID 合约（DIDRegistry + DIDRegistrar, UUPS proxy）
+├── erc8004/          # ERC-8004 三大 Registry（Identity, Reputation, Validation）
+└── mock/             # MockERC20
 
 script/
-├── Deploy.s.sol                  # 一键部署脚本
-└── deployment.json               # 部署地址（自动生成）
+├── Deploy.s.sol      # 一键部署
+└── deployment.json   # 部署地址（自动生成）
 
-agent/                            # TypeScript Demo Agents
-├── src/
-│   ├── shared/                   # 共享代码（config, ABIs, events, logger）
-│   ├── provider/index.ts         # Provider Agent（注册→接单→执行→验证）
-│   ├── client/index.ts           # Client Agent（发布任务→资助→评价）
-│   ├── evaluator/index.ts        # Evaluator Agent（验收→验证响应）
-│   └── index.ts                  # 顺序模式（单进程跑全流程）
+agent/
+└── src/
+    ├── shared/       # 共享代码（config, ABIs, events, logger, feedback-auth）
+    ├── provider/     # Provider Agent（注册身份 → 启动 HTTP 服务 → 执行标注）
+    └── client/       # Client Agent（发现 Agent → 请求标注 → 提交评价）
+
+design/               # 设计文档和规范
 ```
 
 ## 快速开始
 
-### 运行测试
-
-```bash
-forge test -vvv
-```
-
-### 运行 Demo（3 个独立 Agent）
-
-**1. 启动本地链**
+### 1. 启动本地链
 
 ```bash
 anvil --block-time 1
 ```
 
-**2. 部署合约（新终端）**
+### 2. 部署合约
 
 ```bash
 forge script script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast
@@ -59,7 +63,7 @@ forge script script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadc
 
 部署地址自动写入 `script/deployment.json`。
 
-**3. 安装依赖**
+### 3. 配置 Agent
 
 ```bash
 cd agent
@@ -67,60 +71,63 @@ cp .env.example .env
 npm install
 ```
 
-**4. 启动 3 个 Agent（3 个终端）**
+将 `script/deployment.json` 中的地址填入 `.env`：
+
+```env
+DID_REGISTRY=0x...
+DID_REGISTRAR=0x...
+IDENTITY_REGISTRY=0x...
+REPUTATION_REGISTRY=0x...
+VALIDATION_REGISTRY=0x...
+```
+
+### 4. 启动 Provider（终端 1）
 
 ```bash
-# 终端 1: Evaluator（纯监听，最先启动）
-npm run start:evaluator
-
-# 终端 2: Provider（注册身份后监听）
 npm run start:provider
+```
 
-# 终端 3: Client（创建任务，触发整个流程）
-# 等 Provider 显示 "Listening for jobs..." 后启动
+等待输出 `Annotation service running on http://localhost:4021`。
+
+### 5. 启动 Client（终端 2）
+
+```bash
 npm run start:client
 ```
 
-### 顺序模式（单进程）
+Client 自动完成：发现 Agent → 请求标注 → 接收结果 → 提交评价。
 
-```bash
-npm start
+## Demo 输出示例
+
+**Provider:**
+```
+[PROVIDER] Registering Codatta DID
+[PROVIDER] Codatta DID: did:codatta:c038300d50f74a18...
+[PROVIDER] Registering agent in ERC-8004
+[PROVIDER] Agent ID: 328490439698981969...
+[PROVIDER] Linking DID ↔ ERC-8004
+[PROVIDER] ✓ Dual identity established
+[PROVIDER] ✓ Annotation service running on http://localhost:4021
+[PROVIDER] ⚡ Request received — 3 images, task=object-detection
+[PROVIDER] ✓ Annotation complete: 3 images
+[PROVIDER] Validation updated on-chain
 ```
 
-## Demo 流程（Event 驱动）
-
+**Client:**
 ```
-Provider                     Client                      Evaluator
-   |                            |                            |
-   | 注册 ERC-8004 身份          |                            | 监听中...
-   | 监听中...                   |                            |
-   |                            | 创建任务 + 资助 1000 XNY    |
-   |                            |                            |
-   | ⚡ JobCreated              |                            |
-   | ⚡ JobFunded               |                            |
-   | 模拟工作 → 提交             |                            |
-   |                            |                            | ⚡ JobSubmitted
-   |                            |                            | 验收 → 资金分配
-   | ⚡ JobCompleted             | ⚡ JobCompleted             |   925 → Provider
-   | 请求验证                    |                            |    50 → Evaluator
-   | 签名 feedbackAuth           | 读取 feedbackAuth           |    25 → Treasury
-   |                            | 提交评价 score=90           |
-   |                            |                            | ⚡ ValidationRequest
-   |                            |                            | 响应 score=85
+[CLIENT] Discovering agent from ERC-8004
+[CLIENT] Agent name: Codatta Annotation Agent
+[CLIENT] x402 support: true
+[CLIENT] ✓ Service endpoint: http://localhost:4021
+[CLIENT] Submitting 3 images for object detection...
+[CLIENT] ✓ Annotation received: 3 images
+[CLIENT]   street-001.jpg: car(0.95), pedestrian(0.88)
+[CLIENT] ✓ Feedback submitted: score=92
+[CLIENT] Reputation Score: 92
 ```
-
-## 角色与地址
-
-| 角色 | 私钥来源 | 说明 |
-|------|---------|------|
-| **Provider** | `DEPLOYER_PRIVATE_KEY` | Agent NFT owner，注册身份、执行工作、请求验证、签 feedbackAuth |
-| **Client** | `CLIENT_PRIVATE_KEY` | 发布任务、资助任务、提交信誉评价 |
-| **Evaluator** | `EVALUATOR_PRIVATE_KEY` | 验收任务、提交验证响应 |
-
-> ERC-8004 规定 Agent owner 不能给自己写评价，因此 feedback 由 Client 提交，但需要 Provider 签名授权（feedbackAuth）。
 
 ## 技术栈
 
 - **Solidity** ^0.8.20 + **Foundry** (forge/anvil)
-- **TypeScript** + **ethers.js** v6
-- **OpenZeppelin** Contracts v5
+- **TypeScript** + **ethers.js** v6 + **Express**
+- **OpenZeppelin** Contracts v5 (含 Upgradeable)
