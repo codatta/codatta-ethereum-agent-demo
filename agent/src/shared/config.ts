@@ -17,11 +17,11 @@ export function getWallet(envKey: string): ethers.Wallet {
 }
 
 export const addresses = {
-  treasury: process.env.TREASURY_ADDRESS!,
+  didRegistry: process.env.DID_REGISTRY!,
+  didRegistrar: process.env.DID_REGISTRAR!,
   identityRegistry: process.env.IDENTITY_REGISTRY!,
   reputationRegistry: process.env.REPUTATION_REGISTRY!,
   validationRegistry: process.env.VALIDATION_REGISTRY!,
-  acpContract: process.env.ACP_CONTRACT!,
-  hookContract: process.env.HOOK_CONTRACT!,
-  tokenContract: process.env.TOKEN_CONTRACT!,
 };
+
+export const PROVIDER_PORT = parseInt(process.env.PROVIDER_PORT || "4021");

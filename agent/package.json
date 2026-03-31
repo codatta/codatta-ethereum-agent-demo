@@ -1,19 +1,19 @@
 {
   "name": "codatta-demo-agent",
-  "version": "1.0.0",
-  "description": "Demo agent that runs the full Codatta x ERC-8004 x ERC-8183 flow",
+  "version": "2.0.0",
+  "description": "Demo agent: Codatta DID × ERC-8004 × x402 integration",
   "type": "module",
   "scripts": {
-    "start": "tsx src/index.ts",
     "start:provider": "tsx src/provider/index.ts",
-    "start:client": "tsx src/client/index.ts",
-    "start:evaluator": "tsx src/evaluator/index.ts"
+    "start:client": "tsx src/client/index.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.0",
-    "ethers": "^6.13.0"
+    "ethers": "^6.13.0",
+    "express": "^4.21.0"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }

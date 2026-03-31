@@ -1,25 +1,24 @@
 import { ethers } from "ethers";
+import express from "express";
 import fs from "fs";
 import path from "path";
-import { provider, getWallet, addresses } from "../shared/config.js";
+import { provider, getWallet, addresses, PROVIDER_PORT } from "../shared/config.js";
 import {
-  IdentityRegistryABI, ACPContractABI, ValidationRegistryABI,
-  ReputationRegistryABI, MockERC20ABI,
+  DIDRegistrarABI, DIDRegistryABI,
+  IdentityRegistryABI, ValidationRegistryABI, ReputationRegistryABI,
 } from "../shared/abis.js";
-import { waitForEvent } from "../shared/events.js";
 import { buildFeedbackAuth } from "../shared/feedback-auth.js";
 import * as log from "../shared/logger.js";
 
 log.setRole("provider");
 
 const wallet = getWallet("DEPLOYER_PRIVATE_KEY");
+const didRegistrar = new ethers.Contract(addresses.didRegistrar, DIDRegistrarABI, wallet);
+const didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, wallet);
 const identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, wallet);
-const acp = new ethers.Contract(addresses.acpContract, ACPContractABI, wallet);
 const validationReg = new ethers.Contract(addresses.validationRegistry, ValidationRegistryABI, wallet);
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, provider);
-const token = new ethers.Contract(addresses.tokenContract, MockERC20ABI, provider);
 
-const FEEDBACK_AUTH_FILE = path.join(import.meta.dirname, "../../feedback-auth.json");
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
 
 async function main() {
@@ -27,45 +26,49 @@ async function main() {
   log.header(`Provider Agent — Chain ${network.chainId}`);
   log.info("Address:", wallet.address);
 
-  // Step 1: Register in ERC-8004 with Agent URI document
+  // ── Step 1: Register Codatta DID ──────────────────────────────
+  log.step("Registering Codatta DID");
+
+  const didTx = await didRegistrar.register();
+  const didReceipt = await didTx.wait();
+
+  const didEvent = didReceipt.logs
+    .map((l: ethers.Log) => {
+      try { return didRegistry.interface.parseLog({ topics: [...l.topics], data: l.data }); }
+      catch { return null; }
+    })
+    .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
+
+  const codattaDid: bigint = didEvent!.args.identifier;
+  log.info("Codatta DID:", `did:codatta:${codattaDid.toString(16)}`);
+
+  // ── Step 2: Register in ERC-8004 ──────────────────────────────
   log.step("Registering agent in ERC-8004");
 
-  // Agent URI document — describes who this agent is and how to interact with it
-  // In production this would be hosted at a real URL; for demo we use a data URI
-  const agentDocument = {
-    name: "Codatta Demo Annotator",
-    description: "AI agent for data annotation and validation tasks",
-    owner: wallet.address,
-    endpoints: [
-      {
-        name: "MCP",
-        endpoint: "https://codatta.io/mcp/demo-annotator",
-        protocol: "mcp/1.0",
-      },
-      {
-        name: "A2A",
-        endpoint: "https://codatta.io/a2a/demo-annotator",
-        protocol: "a2a/1.0",
-      },
-      {
-        name: "Codatta",
-        endpoint: "https://codatta.io/agent/demo-annotator",
-        capabilities: {
-          roles: ["annotator", "validator"],
-          frontiers: ["data-annotation", "data-validation"],
-        },
-      },
+  const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
+
+  const registrationFile = {
+    type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+    name: "Codatta Annotation Agent",
+    description:
+      "AI agent for image annotation in the Codatta data production ecosystem. " +
+      "Supports object detection labeling, semantic segmentation, and classification.",
+    image: "https://codatta.io/agents/annotation/avatar.png",
+    services: [
+      { name: "web", endpoint: serviceEndpointUrl },
+      { name: "DID", endpoint: `did:codatta:${codattaDid.toString(16)}`, version: "v1" },
     ],
-    // TODO: Evaluator discovery — currently hardcoded, should be provided by
-    // a separate evaluator registry service in production
-    preferredEvaluators: [],
+    active: true,
+    registrations: [] as { agentId: string; agentRegistry: string }[],
+    supportedTrust: ["reputation"],
+    x402Support: true,
   };
 
-  const agentURI = `data:application/json;base64,${Buffer.from(JSON.stringify(agentDocument)).toString("base64")}`;
-  const tx = await identity.register(agentURI);
-  const receipt = await tx.wait();
+  const agentURI = `data:application/json;base64,${Buffer.from(JSON.stringify(registrationFile)).toString("base64")}`;
+  const regTx = await identity.register(agentURI);
+  const regReceipt = await regTx.wait();
 
-  const regEvent = receipt.logs
+  const regEvent = regReceipt.logs
     .map((l: ethers.Log) => {
       try { return identity.interface.parseLog({ topics: [...l.topics], data: l.data }); }
       catch { return null; }
@@ -74,106 +77,124 @@ async function main() {
 
   const agentId: bigint = regEvent!.args.agentId;
   log.info("Agent ID:", agentId.toString());
-  log.info("Agent URI:", "data:application/json;base64,... (agent document)");
-  log.info("MCP endpoint:", agentDocument.endpoints[0].endpoint);
-  log.info("A2A endpoint:", agentDocument.endpoints[1].endpoint);
 
-  // Set Codatta DID metadata
-  const codattaDid = BigInt("0x12345678abcdef0012345678abcdef00");
+  // Update registration with agentId
+  registrationFile.registrations.push({
+    agentId: agentId.toString(),
+    agentRegistry: addresses.identityRegistry,
+  });
+  const updatedURI = `data:application/json;base64,${Buffer.from(JSON.stringify(registrationFile)).toString("base64")}`;
+  await (await identity.setAgentUri(agentId, updatedURI)).wait();
+
+  // ── Step 3: Link DID ↔ ERC-8004 ──────────────────────────────
+  log.step("Linking DID ↔ ERC-8004");
+
   await (await identity.setMetadata(
     agentId, "codatta:did",
     ethers.AbiCoder.defaultAbiCoder().encode(["uint128"], [codattaDid])
   )).wait();
-  log.info("Codatta DID:", `0x${codattaDid.toString(16)}`);
 
-  log.success("Agent registered with document, DID, and capabilities");
-
-  // Write agent info for discovery (in production this would be a marketplace service)
-  fs.writeFileSync(AGENT_INFO_FILE, JSON.stringify({ agentId: agentId.toString() }));
-
-  log.waiting("Listening for jobs...");
-
-  // Listen for JobCreated where provider == self
-  const jobArgs = await waitForEvent(
-    acp, "JobCreated",
-    (_jobId, _client, prov) => (prov as string).toLowerCase() === wallet.address.toLowerCase()
-  );
-
-  const jobId = jobArgs[0] as bigint;
-  const clientAddr = jobArgs[1] as string;
-  log.event("JobCreated", `jobId=${jobId} from client ${clientAddr}`);
-
-  // Wait for funding
-  log.waiting("Waiting for job to be funded...");
-  await waitForEvent(
-    acp, "JobFunded",
-    (id: unknown) => (id as bigint) === jobId
-  );
-  log.event("JobFunded", `jobId=${jobId}`);
-
-  // Simulate work
-  log.step("Executing work");
-  log.info("Simulating data annotation...");
-  await new Promise((r) => setTimeout(r, 2000));
-
-  const deliverable = "ipfs://QmMockDeliverable12345";
-  await (await acp.submit(jobId, deliverable, "0x")).wait();
-  log.success(`Work submitted: ${deliverable}`);
-
-  // Wait for completion
-  log.waiting("Waiting for evaluator to complete job...");
-  await waitForEvent(
-    acp, "JobCompleted",
-    (id: unknown) => (id as bigint) === jobId
-  );
-  log.event("JobCompleted", `jobId=${jobId}`);
-
-  // Request validation
-  log.step("Requesting validation");
-  const requestHash = ethers.keccak256(
-    ethers.AbiCoder.defaultAbiCoder().encode(
-      ["uint256", "string"], [jobId, deliverable]
-    )
-  );
-
-  const evaluatorAddr = (await acp.getJob(jobId))[2];
-  await (await validationReg.validationRequest(
-    evaluatorAddr, agentId, "ipfs://QmMockValidationRequest", requestHash
+  const didServiceEndpoint = JSON.stringify({
+    id: `did:codatta:${codattaDid.toString(16)}#erc8004`,
+    type: "ERC8004Agent",
+    serviceEndpoint: `eip155:${network.chainId}:${addresses.identityRegistry}#${agentId}`,
+  });
+  await (await didRegistry.addItemToAttribute(
+    codattaDid, codattaDid, "service",
+    ethers.toUtf8Bytes(didServiceEndpoint)
   )).wait();
-  log.success("Validation requested");
 
-  // Pre-sign feedbackAuth for Client
-  log.step("Signing feedbackAuth for client");
-  const feedbackAuth = await buildFeedbackAuth({
-    agentId,
-    clientAddress: clientAddr,
-    indexLimit: 10,
-    expiry: Math.floor(Date.now() / 1000) + 3600,
-    chainId: network.chainId,
-    identityRegistry: addresses.identityRegistry,
-    signerWallet: wallet,
+  log.info("DID → ERC-8004:", `agentId=${agentId}`);
+  log.info("ERC-8004 → DID:", `did:codatta:${codattaDid.toString(16)}`);
+  log.success("Dual identity established");
+
+  // Write agent info for client discovery
+  fs.writeFileSync(AGENT_INFO_FILE, JSON.stringify({
+    agentId: agentId.toString(),
+    did: `did:codatta:${codattaDid.toString(16)}`,
+  }));
+
+  // ── Step 4: Start HTTP annotation service ─────────────────────
+  log.step("Starting annotation service");
+
+  const app = express();
+  app.use(express.json());
+
+  // POST /annotate — annotation service
+  // In production: x402 middleware handles payment before this runs.
+  // For local demo: payment is simulated, proceeds directly.
+  app.post("/annotate", async (req, res) => {
+    const { images, task } = req.body;
+    log.event("Request received", `${images?.length || 0} images, task=${task}`);
+
+    // Simulate annotation work
+    log.info("Annotating...");
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const annotations = (images || []).map((img: string, i: number) => ({
+      image: img,
+      labels: [
+        { class: "car", bbox: [100 + i, 200, 300, 400], confidence: 0.95 },
+        { class: "pedestrian", bbox: [400 + i, 150, 500, 450], confidence: 0.88 },
+      ],
+    }));
+
+    log.success(`Annotation complete: ${annotations.length} images`);
+
+    // Build feedbackAuth for client to submit reputation feedback
+    const clientAddress = req.headers["x-client-address"] as string || "";
+    let feedbackAuth = "";
+    try {
+      if (clientAddress) {
+        feedbackAuth = await buildFeedbackAuth({
+          agentId,
+          clientAddress,
+          indexLimit: 1,
+          expiry: Math.floor(Date.now() / 1000) + 86400,
+          chainId: network.chainId,
+          identityRegistry: addresses.identityRegistry,
+          signerWallet: wallet,
+        });
+      }
+    } catch (e: any) {
+      log.info("feedbackAuth build failed:", e.message);
+    }
+
+    // Update validation registry on-chain
+    const requestHash = ethers.keccak256(ethers.toUtf8Bytes(`annotation-${Date.now()}`));
+    try {
+      await (await validationReg.validationRequest(
+        wallet.address, agentId,
+        "ipfs://QmAnnotationResult", requestHash
+      )).wait();
+      await (await validationReg.validationResponse(
+        requestHash, 90,
+        "ipfs://QmValidationReport",
+        ethers.keccak256(ethers.toUtf8Bytes("validation-ok")),
+        ethers.encodeBytes32String("annotation")
+      )).wait();
+      log.info("Validation updated on-chain");
+    } catch (e: any) {
+      log.info("Validation update skipped:", e.message);
+    }
+
+    res.json({
+      status: "completed",
+      annotations,
+      agentId: agentId.toString(),
+      feedbackAuth,
+    });
   });
 
-  fs.writeFileSync(FEEDBACK_AUTH_FILE, JSON.stringify({
-    agentId: agentId.toString(),
-    feedbackAuth: ethers.hexlify(feedbackAuth),
-    clientAddress: clientAddr,
-  }));
-  log.success("feedbackAuth written to feedback-auth.json");
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", agentId: agentId.toString(), active: true });
+  });
 
-  // Query final state
-  log.step("Final state");
-  const score = await reputation.getScore(agentId);
-  // Wait a bit for reputation to be written by client
-  await new Promise((r) => setTimeout(r, 5000));
-  const finalScore = await reputation.getScore(agentId);
-  const balance = await token.balanceOf(wallet.address);
-
-  log.summary({
-    "Agent ID": agentId.toString(),
-    "Codatta DID": `0x${codattaDid.toString(16)}`,
-    "Reputation Score": finalScore.toString(),
-    "Balance": ethers.formatEther(balance) + " XNY",
+  app.listen(PROVIDER_PORT, () => {
+    log.success(`Annotation service running on http://localhost:${PROVIDER_PORT}`);
+    log.info("  POST /annotate  — submit images for annotation");
+    log.info("  GET  /health    — health check");
+    log.waiting("Waiting for requests...");
   });
 }
 
