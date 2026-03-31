@@ -2,4 +2,4 @@ out/
 .env
 cache/
 broadcast/
-docs/
+origin-docs/
