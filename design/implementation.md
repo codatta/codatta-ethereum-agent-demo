@@ -38,8 +38,8 @@
 
 **流程**（Client 视角）：
 1. Client 通过 ERC-8004 发现标注 Agent（Stage 1 的延续）
-2. Client 通过 A2A/MCP 与 Agent 沟通，确认标注类型、参数格式和报价
-3. Client 向 Agent 发起 HTTP 请求（POST 图片列表 + 标注要求）
+2. Client 连接 Agent 的 MCP endpoint，调用 `tools/list` 发现可用的标注 tools 及参数 schema
+3. Client 调用标注 tool（如 `annotate`），传入图片列表和标注类型
 4. Agent 返回 HTTP 402，要求付费
 5. Client 通过 x402 完成链上支付
 6. Agent 确认收款，执行标注（异步），返回任务 ID
@@ -48,6 +48,7 @@
 
 **需要实现**：
 - [ ] 完成 Agent 开发（Provider Agent 提供 HTTP 标注服务，Client Agent 发起请求并付费）
+- [ ] MCP Server：Provider 暴露标注服务为 MCP tool，Client 通过 `tools/list` 动态发现接口并调用
 - [ ] x402 支付集成：Agent 端实现 402 响应和支付验证，Client 端实现自动付款
 - [ ] 标注任务的异步处理机制（任务提交、状态查询、结果返回）
 - [ ] **ERC-8021 App Code 嵌入（待定）**：待有明确多平台业务需求时再接入
@@ -153,6 +154,42 @@ Codatta 业务中的角色，由平台层管理，不写入 DID 基础字段：
 | 在 Codatta 的工作表现 | 数据贡献质量、任务完成率、历史履约 |
 | 资产质押情况 | 质押金额、质押时长 |
 | 综合计算 | 平台基于大数据分析计算信誉分 |
+
+### MCP 标注服务接口
+
+Provider 通过 MCP Server 暴露标注能力，Client 通过 `tools/list` 动态发现，无需预先知道接口定义。
+
+**Tool 定义：**
+
+```json
+{
+  "name": "annotate",
+  "description": "Label images with object detection bounding boxes, semantic segmentation, or classification",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "images": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Image URLs to annotate"
+      },
+      "task": {
+        "type": "string",
+        "enum": ["object-detection", "segmentation", "classification"],
+        "description": "Annotation task type"
+      },
+      "labels": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Label set, e.g. ['car', 'pedestrian', 'traffic-light']"
+      }
+    },
+    "required": ["images", "task"]
+  }
+}
+```
+
+Client 连接 MCP endpoint 后，调用 `tools/list` 获取上述定义，即可知道如何调用标注服务。ERC-8004 注册文件的 services 中声明 MCP endpoint 地址。
 
 ### x402 与 ERC-8004 的配合
 

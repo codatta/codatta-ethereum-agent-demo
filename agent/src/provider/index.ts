@@ -1,7 +1,11 @@
 import { ethers } from "ethers";
 import express from "express";
+import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
 import { provider, getWallet, addresses, PROVIDER_PORT } from "../shared/config.js";
 import {
   DIDRegistrarABI, DIDRegistryABI,
@@ -20,6 +24,40 @@ const validationReg = new ethers.Contract(addresses.validationRegistry, Validati
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, provider);
 
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
+const MCP_PORT = PROVIDER_PORT + 1; // MCP on next port
+
+// ── Shared annotation logic ─────────────────────────────────────
+async function executeAnnotation(images: string[], task: string) {
+  log.info("Annotating...");
+  await new Promise((r) => setTimeout(r, 2000));
+
+  return (images || []).map((img: string, i: number) => ({
+    image: img,
+    labels: [
+      { class: "car", bbox: [100 + i, 200, 300, 400], confidence: 0.95 },
+      { class: "pedestrian", bbox: [400 + i, 150, 500, 450], confidence: 0.88 },
+    ],
+  }));
+}
+
+async function updateValidation(agentId: bigint) {
+  const requestHash = ethers.keccak256(ethers.toUtf8Bytes(`annotation-${Date.now()}`));
+  try {
+    await (await validationReg.validationRequest(
+      wallet.address, agentId,
+      "ipfs://QmAnnotationResult", requestHash
+    )).wait();
+    await (await validationReg.validationResponse(
+      requestHash, 90,
+      "ipfs://QmValidationReport",
+      ethers.keccak256(ethers.toUtf8Bytes("validation-ok")),
+      ethers.encodeBytes32String("annotation")
+    )).wait();
+    log.info("Validation updated on-chain");
+  } catch (e: any) {
+    log.info("Validation update skipped:", e.message);
+  }
+}
 
 async function main() {
   const network = await provider.getNetwork();
@@ -46,6 +84,7 @@ async function main() {
   log.step("Registering agent in ERC-8004");
 
   const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
+  const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
 
   const registrationFile = {
     type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
@@ -56,6 +95,7 @@ async function main() {
     image: "https://codatta.io/agents/annotation/avatar.png",
     services: [
       { name: "web", endpoint: serviceEndpointUrl },
+      { name: "MCP", endpoint: mcpEndpointUrl, version: "2025-06-18" },
       { name: "DID", endpoint: `did:codatta:${codattaDid.toString(16)}`, version: "v1" },
     ],
     active: true,
@@ -78,7 +118,6 @@ async function main() {
   const agentId: bigint = regEvent!.args.agentId;
   log.info("Agent ID:", agentId.toString());
 
-  // Update registration with agentId
   registrationFile.registrations.push({
     agentId: agentId.toString(),
     agentRegistry: addresses.identityRegistry,
@@ -108,40 +147,117 @@ async function main() {
   log.info("ERC-8004 → DID:", `did:codatta:${codattaDid.toString(16)}`);
   log.success("Dual identity established");
 
-  // Write agent info for client discovery
   fs.writeFileSync(AGENT_INFO_FILE, JSON.stringify({
     agentId: agentId.toString(),
     did: `did:codatta:${codattaDid.toString(16)}`,
   }));
 
-  // ── Step 4: Start HTTP annotation service ─────────────────────
-  log.step("Starting annotation service");
+  // ── Step 4: Start MCP Server ──────────────────────────────────
+  log.step("Starting MCP annotation server");
+
+  // Helper: create a fresh McpServer instance with the annotate tool registered
+  function createMcpServerInstance(): McpServer {
+    const server = new McpServer({ name: "codatta-annotation", version: "1.0.0" });
+    server.tool(
+      "annotate",
+      "Label images with object detection bounding boxes, semantic segmentation, or classification",
+      {
+        images: z.array(z.string()).describe("Image URLs to annotate"),
+        task: z.enum(["object-detection", "segmentation", "classification"]).describe("Annotation task type"),
+        labels: z.array(z.string()).optional().describe("Label set, e.g. ['car', 'pedestrian', 'traffic-light']"),
+        clientAddress: z.string().optional().describe("Client wallet address for feedbackAuth"),
+      },
+      async ({ images, task, clientAddress }) => {
+        log.event("MCP tool call", `annotate: ${images.length} images, task=${task}`);
+        const annotations = await executeAnnotation(images, task);
+        log.success(`Annotation complete: ${annotations.length} images`);
+        await updateValidation(agentId);
+
+        let feedbackAuth = "";
+        try {
+          if (clientAddress) {
+            feedbackAuth = await buildFeedbackAuth({
+              agentId, clientAddress, indexLimit: 1,
+              expiry: Math.floor(Date.now() / 1000) + 86400,
+              chainId: network.chainId,
+              identityRegistry: addresses.identityRegistry,
+              signerWallet: wallet,
+            });
+          }
+        } catch {}
+
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            status: "completed", annotations, agentId: agentId.toString(), feedbackAuth,
+          })}],
+        };
+      }
+    );
+    return server;
+  }
+
+  // MCP over Streamable HTTP (stateless mode — each request gets a fresh session)
+  const mcpApp = express();
+  const transports = new Map<string, StreamableHTTPServerTransport>();
+
+  mcpApp.post("/mcp", async (req, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    let transport: StreamableHTTPServerTransport;
+
+    if (sessionId && transports.has(sessionId)) {
+      transport = transports.get(sessionId)!;
+    } else {
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (id) => {
+          transports.set(id, transport);
+        },
+      });
+      const server = createMcpServerInstance();
+      await server.connect(transport);
+    }
+
+    await transport.handleRequest(req, res);
+  });
+
+  mcpApp.get("/mcp", async (req, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string;
+    const transport = transports.get(sessionId);
+    if (!transport) { res.status(400).json({ error: "No session" }); return; }
+    await transport.handleRequest(req, res);
+  });
+
+  mcpApp.delete("/mcp", async (req, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string;
+    const transport = transports.get(sessionId);
+    if (transport) {
+      await transport.handleRequest(req, res);
+      transports.delete(sessionId);
+    } else {
+      res.status(200).end();
+    }
+  });
+
+  mcpApp.listen(MCP_PORT, () => {
+    log.success(`MCP server running on ${mcpEndpointUrl}`);
+    log.info("  Tool: annotate(images, task, labels?, clientAddress?)");
+  });
+
+  // ── Step 5: Start HTTP service (REST fallback) ────────────────
+  log.step("Starting HTTP annotation service");
 
   const app = express();
   app.use(express.json());
 
-  // POST /annotate — annotation service
-  // In production: x402 middleware handles payment before this runs.
-  // For local demo: payment is simulated, proceeds directly.
   app.post("/annotate", async (req, res) => {
     const { images, task } = req.body;
-    log.event("Request received", `${images?.length || 0} images, task=${task}`);
+    log.event("HTTP request", `${images?.length || 0} images, task=${task}`);
 
-    // Simulate annotation work
-    log.info("Annotating...");
-    await new Promise((r) => setTimeout(r, 2000));
-
-    const annotations = (images || []).map((img: string, i: number) => ({
-      image: img,
-      labels: [
-        { class: "car", bbox: [100 + i, 200, 300, 400], confidence: 0.95 },
-        { class: "pedestrian", bbox: [400 + i, 150, 500, 450], confidence: 0.88 },
-      ],
-    }));
-
+    const annotations = await executeAnnotation(images, task);
     log.success(`Annotation complete: ${annotations.length} images`);
 
-    // Build feedbackAuth for client to submit reputation feedback
+    await updateValidation(agentId);
+
     const clientAddress = req.headers["x-client-address"] as string || "";
     let feedbackAuth = "";
     try {
@@ -156,27 +272,7 @@ async function main() {
           signerWallet: wallet,
         });
       }
-    } catch (e: any) {
-      log.info("feedbackAuth build failed:", e.message);
-    }
-
-    // Update validation registry on-chain
-    const requestHash = ethers.keccak256(ethers.toUtf8Bytes(`annotation-${Date.now()}`));
-    try {
-      await (await validationReg.validationRequest(
-        wallet.address, agentId,
-        "ipfs://QmAnnotationResult", requestHash
-      )).wait();
-      await (await validationReg.validationResponse(
-        requestHash, 90,
-        "ipfs://QmValidationReport",
-        ethers.keccak256(ethers.toUtf8Bytes("validation-ok")),
-        ethers.encodeBytes32String("annotation")
-      )).wait();
-      log.info("Validation updated on-chain");
-    } catch (e: any) {
-      log.info("Validation update skipped:", e.message);
-    }
+    } catch {}
 
     res.json({
       status: "completed",
@@ -191,8 +287,8 @@ async function main() {
   });
 
   app.listen(PROVIDER_PORT, () => {
-    log.success(`Annotation service running on http://localhost:${PROVIDER_PORT}`);
-    log.info("  POST /annotate  — submit images for annotation");
+    log.success(`HTTP service running on http://localhost:${PROVIDER_PORT}`);
+    log.info("  POST /annotate  — REST endpoint");
     log.info("  GET  /health    — health check");
     log.waiting("Waiting for requests...");
   });
