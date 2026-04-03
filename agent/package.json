@@ -6,9 +6,12 @@
   "scripts": {
     "start:provider": "tsx src/provider/index.ts",
     "start:client": "tsx src/client/index.ts",
-    "query": "tsx src/query/index.ts"
+    "query": "tsx src/query/index.ts",
+    "start:recruiter": "tsx src/recruiter/index.ts",
+    "start:external": "tsx src/recruiter/external-agent.ts"
   },
   "dependencies": {
+    "@a2a-js/sdk": "^0.3.13",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^16.4.0",
     "ethers": "^6.13.0",
