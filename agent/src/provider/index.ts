@@ -26,9 +26,21 @@ const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationR
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
 const MCP_PORT = PROVIDER_PORT + 1; // MCP on next port
 
-// ── Shared annotation logic ─────────────────────────────────────
+// ── Task store (async annotation) ───────────────────────────────
+interface AnnotationTask {
+  id: string;
+  status: "working" | "completed" | "failed";
+  images: string[];
+  task: string;
+  annotations?: Array<{ image: string; labels: Array<{ class: string; bbox: number[]; confidence: number }> }>;
+  feedbackAuth?: string;
+  createdAt: number;
+  completedAt?: number;
+}
+
+const taskStore = new Map<string, AnnotationTask>();
+
 async function executeAnnotation(images: string[], task: string) {
-  log.info("Annotating...");
   await new Promise((r) => setTimeout(r, 2000));
 
   return (images || []).map((img: string, i: number) => ({
@@ -155,12 +167,14 @@ async function main() {
   // ── Step 4: Start MCP Server ──────────────────────────────────
   log.step("Starting MCP annotation server");
 
-  // Helper: create a fresh McpServer instance with the annotate tool registered
+  // Helper: create a fresh McpServer instance with tools registered
   function createMcpServerInstance(): McpServer {
     const server = new McpServer({ name: "codatta-annotation", version: "1.0.0" });
+
+    // Tool: annotate (async — returns taskId, work happens in background)
     server.tool(
       "annotate",
-      "Label images with object detection bounding boxes, semantic segmentation, or classification",
+      "Label images with object detection bounding boxes, semantic segmentation, or classification. Returns a taskId for async status polling.",
       {
         images: z.array(z.string()).describe("Image URLs to annotate"),
         task: z.enum(["object-detection", "segmentation", "classification"]).describe("Annotation task type"),
@@ -169,30 +183,86 @@ async function main() {
       },
       async ({ images, task, clientAddress }) => {
         log.event("MCP tool call", `annotate: ${images.length} images, task=${task}`);
-        const annotations = await executeAnnotation(images, task);
-        log.success(`Annotation complete: ${annotations.length} images`);
-        await updateValidation(agentId);
 
-        let feedbackAuth = "";
-        try {
-          if (clientAddress) {
-            feedbackAuth = await buildFeedbackAuth({
-              agentId, clientAddress, indexLimit: 1,
-              expiry: Math.floor(Date.now() / 1000) + 86400,
-              chainId: network.chainId,
-              identityRegistry: addresses.identityRegistry,
-              signerWallet: wallet,
-            });
+        const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const annotationTask: AnnotationTask = {
+          id: taskId, status: "working", images, task, createdAt: Date.now(),
+        };
+        taskStore.set(taskId, annotationTask);
+        log.info(`Task created: ${taskId}`);
+
+        // Execute in background
+        (async () => {
+          try {
+            log.info("Annotating...");
+            const annotations = await executeAnnotation(images, task);
+            log.success(`Annotation complete: ${annotations.length} images`);
+            await updateValidation(agentId);
+
+            let feedbackAuth = "";
+            try {
+              if (clientAddress) {
+                feedbackAuth = await buildFeedbackAuth({
+                  agentId, clientAddress, indexLimit: 1,
+                  expiry: Math.floor(Date.now() / 1000) + 86400,
+                  chainId: network.chainId,
+                  identityRegistry: addresses.identityRegistry,
+                  signerWallet: wallet,
+                });
+              }
+            } catch {}
+
+            annotationTask.status = "completed";
+            annotationTask.annotations = annotations;
+            annotationTask.feedbackAuth = feedbackAuth;
+            annotationTask.completedAt = Date.now();
+          } catch {
+            annotationTask.status = "failed";
           }
-        } catch {}
+        })();
 
         return {
           content: [{ type: "text" as const, text: JSON.stringify({
-            status: "completed", annotations, agentId: agentId.toString(), feedbackAuth,
+            taskId, status: "working", message: "Task submitted. Use get_task_status to poll for results.",
           })}],
         };
       }
     );
+
+    // Tool: get_task_status
+    server.tool(
+      "get_task_status",
+      "Query the status of an async annotation task. Returns annotations when completed.",
+      {
+        taskId: z.string().describe("Task ID returned by annotate"),
+      },
+      async ({ taskId }) => {
+        const task = taskStore.get(taskId);
+        if (!task) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Task not found" }) }] };
+        }
+
+        if (task.status === "completed") {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({
+              taskId: task.id,
+              status: task.status,
+              annotations: task.annotations,
+              agentId: agentId.toString(),
+              feedbackAuth: task.feedbackAuth || "",
+              duration: `${((task.completedAt! - task.createdAt) / 1000).toFixed(1)}s`,
+            })}],
+          };
+        }
+
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            taskId: task.id, status: task.status,
+          })}],
+        };
+      }
+    );
+
     return server;
   }
 
