@@ -218,7 +218,9 @@ async function main() {
     // Tool: annotate (async — returns taskId, work happens in background)
     server.tool(
       "annotate",
-      "Label images with object detection bounding boxes, semantic segmentation, or classification. Returns a taskId for async status polling.",
+      "Submit images for annotation. This is an async operation — returns a taskId immediately. " +
+      "Use get_task_status(taskId) to poll for results. Status transitions: working → completed/failed. " +
+      "Pass clientDid to use free quota (from claim_invite), otherwise x402 payment is required.",
       {
         images: z.array(z.string()).describe("Image URLs to annotate"),
         task: z.enum(["object-detection", "segmentation", "classification"]).describe("Annotation task type"),
@@ -291,7 +293,9 @@ async function main() {
     // Tool: get_task_status
     server.tool(
       "get_task_status",
-      "Query the status of an async annotation task. Returns annotations when completed.",
+      "Poll the status of a task returned by annotate. Returns {status: 'working'} while in progress, " +
+      "or {status: 'completed', annotations: [...], feedbackAuth: '...'} when done. " +
+      "Recommended polling interval: 1 second.",
       {
         taskId: z.string().describe("Task ID returned by annotate"),
       },
@@ -325,7 +329,9 @@ async function main() {
     // Tool: claim_invite — claim an invite code to get free quota after DID registration
     server.tool(
       "claim_invite",
-      "Claim an invite code after registering a Codatta DID. Grants free annotation quota.",
+      "Claim an invite code to receive free annotation credits. " +
+      "Prerequisites: 1) Get an invite code via A2A consultation, 2) Register a Codatta DID. " +
+      "After claiming, pass your clientDid to annotate to use free quota.",
       {
         inviteCode: z.string().describe("Invite code received from A2A consultation"),
         clientDid: z.string().describe("Your registered Codatta DID (did:codatta:xxx)"),
