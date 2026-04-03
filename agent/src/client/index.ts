@@ -5,7 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { provider, getWallet, addresses } from "../shared/config.js";
 import {
-  IdentityRegistryABI, ReputationRegistryABI, DIDRegistryABI,
+  IdentityRegistryABI, ReputationRegistryABI, DIDRegistryABI, DIDRegistrarABI,
 } from "../shared/abis.js";
 import * as log from "../shared/logger.js";
 
@@ -14,6 +14,7 @@ log.setRole("client");
 const wallet = getWallet("CLIENT_PRIVATE_KEY");
 const identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, provider);
 const didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, provider);
+const didRegistrar = new ethers.Contract(addresses.didRegistrar, DIDRegistrarABI, wallet);
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, wallet);
 
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
@@ -30,6 +31,53 @@ async function discoverAgentId(): Promise<bigint> {
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error("Agent not found — is the Provider running?");
+}
+
+// ── A2A helpers ─────────────────────────────────────────────────
+let rpcId = 1;
+const A2A_CONTEXT = `client-ctx-${Date.now()}`;
+
+async function a2aSend(url: string, taskId: string | undefined, parts: any[]): Promise<any> {
+  const body = {
+    jsonrpc: "2.0",
+    id: rpcId++,
+    method: "message/send",
+    params: {
+      id: taskId || `task-${Date.now()}`,
+      message: {
+        role: "user",
+        messageId: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        contextId: A2A_CONTEXT,
+        parts,
+      },
+    },
+  };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json() as any;
+  if (json.error) throw new Error(`A2A error: ${json.error.message}`);
+  return json.result;
+}
+
+function getAgentText(result: any): string {
+  const history = result.history || [];
+  const agent = history.filter((m: any) => m.role === "agent");
+  const last = agent[agent.length - 1];
+  if (!last) return "";
+  const text = last.parts?.find((p: any) => p.type === "text" || p.kind === "text");
+  return text?.text || "";
+}
+
+function getAgentData(result: any): any {
+  const history = result.history || [];
+  const agent = history.filter((m: any) => m.role === "agent");
+  const last = agent[agent.length - 1];
+  if (!last) return {};
+  const data = last.parts?.find((p: any) => p.type === "data" || p.kind === "data");
+  return data?.data || {};
 }
 
 async function main() {
@@ -53,185 +101,163 @@ async function main() {
   }
 
   log.info("Agent name:", (registrationFile.name as string) || "unknown");
-  log.info("Description:", ((registrationFile.description as string) || "").slice(0, 80) + "...");
-  log.info("Owner:", providerAddr);
 
   const services = (registrationFile.services || []) as Array<{ name: string; endpoint: string }>;
   for (const svc of services) {
     log.info(`  ${svc.name}:`, svc.endpoint);
   }
 
-  // Find MCP endpoint
   const mcpService = services.find(s => s.name === "MCP");
-  if (!mcpService) throw new Error("No MCP service endpoint found");
+  const a2aService = services.find(s => s.name === "A2A");
+  if (!mcpService) throw new Error("No MCP endpoint found");
 
-  log.success(`MCP endpoint: ${mcpService.endpoint}`);
+  // ── Step 2: A2A consultation — learn about services + get invite ─
+  log.step("A2A consultation with Provider");
 
-  // ── Step 2: Verify DID ↔ ERC-8004 linkage ─────────────────────
-  log.step("Verifying DID ↔ ERC-8004 linkage");
+  if (a2aService) {
+    const a2aUrl = a2aService.endpoint.replace("/.well-known/agent-card.json", "");
 
-  const didService = services.find(s => s.name === "DID");
-  if (didService) {
-    const didHex = didService.endpoint.replace("did:codatta:", "");
-    const didIdentifier = BigInt(`0x${didHex}`);
+    // Fetch Agent Card
+    const cardRes = await fetch(a2aService.endpoint);
+    const card = await cardRes.json() as any;
+    log.info("A2A Agent:", card.name);
+    log.info("Skills:", card.skills?.map((s: any) => s.name).join(", "));
 
-    // Forward: DID → ERC-8004 (check DID document has service endpoint pointing to this agentId)
-    const didDoc = await didRegistry.getDidDocument(didIdentifier);
-    const arrayAttrs = didDoc[4]; // fifth return value
-    let didPointsToAgent = false;
-    for (const attr of arrayAttrs) {
-      const attrName = attr[0] ?? attr.name;
-      if (attrName !== "service") continue;
-      const items = attr[1] ?? attr.values ?? [];
-      for (const item of Array.from(items)) {
-        const val = (item as any)[0] ?? (item as any).value;
-        const revoked = (item as any)[1] ?? (item as any).revoked ?? false;
-        if (revoked) continue;
-        try {
-          const ep = JSON.parse(ethers.toUtf8String(val));
-          if (ep.type === "ERC8004Agent" && ep.serviceEndpoint.includes(`#${agentId}`)) {
-            didPointsToAgent = true;
-          }
-        } catch {}
+    // Ask about services
+    const result1 = await a2aSend(a2aUrl, undefined, [{
+      type: "text",
+      text: "Hi, I need image annotation for autonomous driving data. What do you offer?",
+    }]);
+    const taskId = result1.id;
+    log.info("Provider:", getAgentText(result1).slice(0, 120) + "...");
+
+    // Request invite code
+    const result2 = await a2aSend(a2aUrl, taskId, [
+      { type: "text", text: "Yes, I'd like an invite code for free annotations." },
+      { type: "data", data: { clientAddress: wallet.address } },
+    ]);
+    log.info("Provider:", getAgentText(result2).slice(0, 120) + "...");
+
+    const inviteData = getAgentData(result2);
+    if (inviteData.inviteCode) {
+      log.success(`Invite code received: ${inviteData.inviteCode.slice(0, 18)}...`);
+      log.info(`Free quota: ${inviteData.freeQuota} images`);
+
+      // ── Step 3: Register Codatta DID ────────────────────────────
+      log.step("Registering Codatta DID");
+
+      const didTx = await didRegistrar.register();
+      const didReceipt = await didTx.wait();
+      const didEvent = didReceipt.logs
+        .map((l: ethers.Log) => {
+          try { return didRegistry.interface.parseLog({ topics: [...l.topics], data: l.data }); }
+          catch { return null; }
+        })
+        .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
+
+      const clientDid = `did:codatta:${didEvent!.args.identifier.toString(16)}`;
+      log.success(`Registered DID: ${clientDid}`);
+
+      // ── Step 4: Claim invite via MCP ────────────────────────────
+      log.step("Claiming invite code via MCP");
+
+      const mcpClient = new Client({ name: "codatta-client", version: "1.0.0" });
+      const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint));
+      await mcpClient.connect(transport);
+
+      const { tools } = await mcpClient.listTools();
+      log.info(`Discovered ${tools.length} tool(s): ${tools.map(t => t.name).join(", ")}`);
+
+      const claimResult = await mcpClient.callTool({
+        name: "claim_invite",
+        arguments: { inviteCode: inviteData.inviteCode, clientDid },
+      });
+      const claimText = claimResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
+      const claimData = claimText ? JSON.parse(claimText.text) : {};
+      log.success(`Invite claimed! Free quota: ${claimData.freeQuota} images`);
+
+      // ── Step 5: Annotate with free quota ──────────────────────────
+      log.step("Requesting annotation (using free quota)");
+
+      const images = [
+        "https://example.com/street-001.jpg",
+        "https://example.com/street-002.jpg",
+        "https://example.com/street-003.jpg",
+      ];
+
+      log.info(`Calling annotate: ${images.length} images, task=object-detection`);
+
+      const submitResult = await mcpClient.callTool({
+        name: "annotate",
+        arguments: {
+          images,
+          task: "object-detection",
+          clientAddress: wallet.address,
+          clientDid,
+        },
+      });
+      const submitText = submitResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
+      const submitData = submitText ? JSON.parse(submitText.text) : {};
+      log.info(`Task submitted: ${submitData.taskId} (status: ${submitData.status})`);
+
+      // Poll for completion
+      log.info("Polling for completion...");
+      let result: any = null;
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const statusResult = await mcpClient.callTool({
+          name: "get_task_status",
+          arguments: { taskId: submitData.taskId },
+        });
+        const statusText = statusResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
+        if (!statusText) continue;
+        const statusData = JSON.parse(statusText.text);
+        if (statusData.status === "completed") { result = statusData; break; }
+        if (statusData.status === "failed") throw new Error("Annotation task failed");
       }
-    }
 
-    // Reverse: ERC-8004 → DID (check metadata has codatta:did pointing to this DID)
-    let agentPointsToDid = false;
-    try {
-      const didBytes = await identity.getMetadata(agentId, "codatta:did");
-      const storedDid = ethers.AbiCoder.defaultAbiCoder().decode(["uint128"], didBytes)[0];
-      agentPointsToDid = storedDid === didIdentifier;
-    } catch {}
+      if (!result) throw new Error("Task did not complete within timeout");
 
-    if (didPointsToAgent && agentPointsToDid) {
-      log.success(`DID linkage verified: did:codatta:${didHex} ↔ agentId=${agentId}`);
+      log.success(`Annotation received: ${result.annotations.length} images (${result.duration})`);
+      for (const ann of result.annotations) {
+        log.info(`  ${ann.image}: ${ann.labels.map((l: any) => `${l.class}(${l.confidence})`).join(", ")}`);
+      }
+
+      await mcpClient.close();
+
+      // ── Step 6: Submit reputation feedback ──────────────────────
+      log.step("Submitting reputation feedback");
+
+      if (result.feedbackAuth) {
+        const feedbackHash = ethers.keccak256(ethers.toUtf8Bytes("annotation-feedback"));
+        await (await reputation.giveFeedback(
+          agentId, 92,
+          ethers.encodeBytes32String("annotation"),
+          ethers.encodeBytes32String("quality"),
+          "ipfs://QmAnnotationFeedback",
+          feedbackHash,
+          result.feedbackAuth
+        )).wait();
+        log.success("Feedback submitted: score=92");
+      }
+
+      // ── Summary ─────────────────────────────────────────────────
+      const score = await reputation.getScore(agentId);
+      log.summary({
+        "Agent ID": agentId.toString(),
+        "Client DID": clientDid,
+        "Free Quota Used": `${images.length} images`,
+        "Reputation Score": score.toString(),
+        "Annotations": `${result.annotations.length} images`,
+        "Protocol": "A2A (consult) → MCP (execute)",
+      });
+
     } else {
-      log.info(`DID linkage incomplete: DID→Agent=${didPointsToAgent}, Agent→DID=${agentPointsToDid}`);
+      log.info("No invite code received, proceeding without free quota");
     }
   } else {
-    log.info("No DID service declared, skipping verification");
+    log.info("No A2A endpoint found, skipping consultation");
   }
-
-  // ── Step 3: Connect MCP Client ─────────────────────────────────
-  log.step("Connecting to MCP server");
-
-  const mcpClient = new Client({ name: "codatta-client", version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint));
-  await mcpClient.connect(transport);
-
-  log.info("MCP connection established");
-
-  // Discover tools
-  const { tools } = await mcpClient.listTools();
-  log.info(`Discovered ${tools.length} tool(s):`);
-  for (const tool of tools) {
-    log.info(`  ${tool.name}: ${tool.description}`);
-  }
-
-  const annotateTool = tools.find(t => t.name === "annotate");
-  if (!annotateTool) throw new Error("annotate tool not found on MCP server");
-
-  // ── Step 4: Submit annotation task via MCP ─────────────────────
-  log.step("Submitting annotation task via MCP");
-
-  const images = [
-    "https://example.com/street-001.jpg",
-    "https://example.com/street-002.jpg",
-    "https://example.com/street-003.jpg",
-  ];
-
-  log.info(`Calling annotate tool: ${images.length} images, task=object-detection`);
-
-  const submitResult = await mcpClient.callTool({
-    name: "annotate",
-    arguments: {
-      images,
-      task: "object-detection",
-      clientAddress: wallet.address,
-    },
-  });
-
-  const submitText = submitResult.content.find(
-    (c): c is { type: "text"; text: string } => (c as any).type === "text"
-  );
-  if (!submitText) throw new Error("No result from annotate tool");
-
-  const submitData = JSON.parse(submitText.text) as { taskId: string; status: string };
-  log.info(`Task submitted: ${submitData.taskId} (status: ${submitData.status})`);
-
-  // ── Step 4b: Poll for task completion ─────────────────────────
-  log.info("Polling for task completion...");
-
-  let result: {
-    status: string;
-    annotations: Array<{ image: string; labels: Array<{ class: string; confidence: number }> }>;
-    agentId: string;
-    feedbackAuth: string;
-    duration?: string;
-  } | null = null;
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-
-    const statusResult = await mcpClient.callTool({
-      name: "get_task_status",
-      arguments: { taskId: submitData.taskId },
-    });
-
-    const statusText = statusResult.content.find(
-      (c): c is { type: "text"; text: string } => (c as any).type === "text"
-    );
-    if (!statusText) continue;
-
-    const statusData = JSON.parse(statusText.text);
-    if (statusData.status === "completed") {
-      result = statusData;
-      break;
-    }
-    if (statusData.status === "failed") {
-      throw new Error("Annotation task failed");
-    }
-  }
-
-  if (!result) throw new Error("Task did not complete within timeout");
-
-  log.success(`Annotation received: ${result.annotations.length} images (${result.duration})`);
-  for (const ann of result.annotations) {
-    log.info(`  ${ann.image}: ${ann.labels.map(l => `${l.class}(${l.confidence})`).join(", ")}`);
-  }
-
-  // Close MCP connection
-  await mcpClient.close();
-
-  // ── Step 5: Submit reputation feedback ────────────────────────
-  log.step("Submitting reputation feedback");
-
-  if (result.feedbackAuth) {
-    const feedbackHash = ethers.keccak256(ethers.toUtf8Bytes("annotation-feedback"));
-    await (await reputation.giveFeedback(
-      agentId, 92,
-      ethers.encodeBytes32String("annotation"),
-      ethers.encodeBytes32String("quality"),
-      "ipfs://QmAnnotationFeedback",
-      feedbackHash,
-      result.feedbackAuth
-    )).wait();
-    log.success("Feedback submitted: score=92");
-  } else {
-    log.info("No feedbackAuth received, skipping feedback");
-  }
-
-  // ── Summary ───────────────────────────────────────────────────
-  const score = await reputation.getScore(agentId);
-  log.summary({
-    "Agent ID": agentId.toString(),
-    "Reputation Score": score.toString(),
-    "Annotations": `${result.annotations.length} images`,
-    "Protocol": "MCP (Streamable HTTP)",
-    "Status": result.status,
-  });
-
 }
 
 main().catch((err) => {

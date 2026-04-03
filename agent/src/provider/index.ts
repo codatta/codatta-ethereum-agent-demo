@@ -5,6 +5,19 @@ import fs from "fs";
 import path from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+  DefaultRequestHandler,
+  InMemoryTaskStore,
+  type AgentExecutor,
+  type RequestContext,
+  type ExecutionEventBus,
+} from "@a2a-js/sdk/server";
+import {
+  jsonRpcHandler,
+  agentCardHandler,
+  UserBuilder,
+} from "@a2a-js/sdk/server/express";
+import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
 import { provider, getWallet, addresses, PROVIDER_PORT } from "../shared/config.js";
 import {
@@ -24,7 +37,36 @@ const validationReg = new ethers.Contract(addresses.validationRegistry, Validati
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, provider);
 
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
-const MCP_PORT = PROVIDER_PORT + 1; // MCP on next port
+const MCP_PORT = PROVIDER_PORT + 1;
+const A2A_PORT = PROVIDER_PORT + 2;
+
+// ── Invite code + free quota ────────────────────────────────────
+const FREE_QUOTA = 10; // free annotations per invite code
+const freeQuotaStore = new Map<string, number>(); // did → remaining free count
+
+function generateInviteCode(providerAddress: string, clientAddress: string): string {
+  // Invite code = keccak256(provider + client + timestamp) — Provider can prove authorship
+  const payload = ethers.solidityPackedKeccak256(
+    ["address", "address", "uint256"],
+    [providerAddress, clientAddress, Math.floor(Date.now() / 1000)]
+  );
+  return payload;
+}
+
+function grantFreeQuota(did: string) {
+  const current = freeQuotaStore.get(did) || 0;
+  freeQuotaStore.set(did, current + FREE_QUOTA);
+  log.info(`Free quota granted: ${did} → ${current + FREE_QUOTA} images`);
+}
+
+function consumeFreeQuota(did: string, count: number): boolean {
+  const remaining = freeQuotaStore.get(did) || 0;
+  if (remaining >= count) {
+    freeQuotaStore.set(did, remaining - count);
+    return true;
+  }
+  return false;
+}
 
 // ── Task store (async annotation) ───────────────────────────────
 interface AnnotationTask {
@@ -97,6 +139,7 @@ async function main() {
 
   const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
   const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
+  const a2aEndpointUrl = `http://localhost:${A2A_PORT}`;
 
   const registrationFile = {
     type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
@@ -108,6 +151,7 @@ async function main() {
     services: [
       { name: "web", endpoint: serviceEndpointUrl },
       { name: "MCP", endpoint: mcpEndpointUrl, version: "2025-06-18" },
+      { name: "A2A", endpoint: `${a2aEndpointUrl}/.well-known/agent-card.json`, version: "0.3.0" },
       { name: "DID", endpoint: `did:codatta:${codattaDid.toString(16)}`, version: "v1" },
     ],
     active: true,
@@ -180,9 +224,24 @@ async function main() {
         task: z.enum(["object-detection", "segmentation", "classification"]).describe("Annotation task type"),
         labels: z.array(z.string()).optional().describe("Label set, e.g. ['car', 'pedestrian', 'traffic-light']"),
         clientAddress: z.string().optional().describe("Client wallet address for feedbackAuth"),
+        clientDid: z.string().optional().describe("Client Codatta DID for free quota check"),
       },
-      async ({ images, task, clientAddress }) => {
+      async ({ images, task, clientAddress, clientDid }) => {
         log.event("MCP tool call", `annotate: ${images.length} images, task=${task}`);
+
+        // Check free quota
+        let usedFreeQuota = false;
+        if (clientDid) {
+          usedFreeQuota = consumeFreeQuota(clientDid, images.length);
+          if (usedFreeQuota) {
+            const remaining = freeQuotaStore.get(clientDid) || 0;
+            log.info(`Free quota used: ${images.length} images (remaining: ${remaining})`);
+          }
+        }
+        if (!usedFreeQuota) {
+          // In production: require x402 payment here
+          log.info("No free quota — payment required (skipped in demo)");
+        }
 
         const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const annotationTask: AnnotationTask = {
@@ -263,6 +322,30 @@ async function main() {
       }
     );
 
+    // Tool: claim_invite — claim an invite code to get free quota after DID registration
+    server.tool(
+      "claim_invite",
+      "Claim an invite code after registering a Codatta DID. Grants free annotation quota.",
+      {
+        inviteCode: z.string().describe("Invite code received from A2A consultation"),
+        clientDid: z.string().describe("Your registered Codatta DID (did:codatta:xxx)"),
+      },
+      async ({ inviteCode, clientDid }) => {
+        log.event("MCP tool call", `claim_invite: did=${clientDid}`);
+        // In production: verify invite code signature on-chain
+        grantFreeQuota(clientDid);
+        const remaining = freeQuotaStore.get(clientDid) || 0;
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            status: "claimed",
+            did: clientDid,
+            freeQuota: remaining,
+            message: `Welcome! You have ${remaining} free annotation credits.`,
+          })}],
+        };
+      }
+    );
+
     return server;
   }
 
@@ -313,7 +396,145 @@ async function main() {
     log.info("  Tool: annotate(images, task, labels?, clientAddress?)");
   });
 
-  // ── Step 5: Start HTTP service (REST fallback) ────────────────
+  // ── Step 5: Start A2A consultation server ──────────────────────
+  log.step("Starting A2A consultation server");
+
+  const a2aAgentCard: AgentCard = {
+    name: "Codatta Annotation Agent",
+    description: "Pre-sales consultation for data annotation services. Ask about capabilities, pricing, and DID registration benefits.",
+    url: `http://localhost:${A2A_PORT}`,
+    provider: { organization: "Codatta", url: "https://codatta.io" },
+    version: "1.0.0",
+    capabilities: { streaming: false, pushNotifications: false },
+    skills: [
+      { id: "consult", name: "Service Consultation", description: "Ask about annotation capabilities, pricing, and free quota" },
+      { id: "invite", name: "DID Invite", description: "Get an invite code for free annotation quota" },
+    ],
+  };
+
+  class ConsultationExecutor implements AgentExecutor {
+    private conversationState = new Map<string, string>();
+
+    async execute(ctx: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
+      const textPart = ctx.userMessage.parts?.find((p: any) => p.type === "text") as any;
+      const userText = (textPart?.text || "").toLowerCase();
+      const contextKey = ctx.contextId || ctx.taskId;
+      const state = this.conversationState.get(contextKey) || "initial";
+
+      log.event("A2A consultation", `context=${contextKey}, state=${state}`);
+
+      if (state === "initial") {
+        // First message — introduce services and ask about needs
+        this.conversationState.set(contextKey, "consulting");
+        eventBus.publish({
+          kind: "task",
+          id: ctx.taskId,
+          contextId: contextKey,
+          status: { state: "input-required", timestamp: new Date().toISOString() },
+          history: [{
+            role: "agent",
+            messageId: `resp-${Date.now()}`,
+            parts: [
+              {
+                type: "text",
+                text: "Hi! I'm the Codatta Annotation Agent. I provide data annotation services including:\n\n" +
+                  "• **Object detection** — bounding boxes for cars, pedestrians, etc.\n" +
+                  "• **Segmentation** — pixel-level labeling\n" +
+                  "• **Classification** — image/text categorization\n\n" +
+                  "Pricing: $0.05/image for standard annotation.\n\n" +
+                  "🎁 **New user offer**: Register a Codatta DID and get **10 free annotations**!\n" +
+                  "Would you like an invite code?",
+              },
+            ],
+          }],
+        } as any);
+        eventBus.finished();
+        return;
+      }
+
+      // Consulting state — handle various queries
+      if (userText.includes("invite") || userText.includes("register") || userText.includes("free") || userText.includes("yes")) {
+        const dataPart = ctx.userMessage.parts?.find((p: any) => p.type === "data") as any;
+        const clientAddress = dataPart?.data?.clientAddress || "";
+        const inviteCode = generateInviteCode(wallet.address, clientAddress);
+
+        this.conversationState.set(contextKey, "invited");
+        eventBus.publish({
+          kind: "task",
+          id: ctx.taskId,
+          contextId: contextKey,
+          status: { state: "completed", timestamp: new Date().toISOString() },
+          history: [{
+            role: "agent",
+            messageId: `resp-${Date.now()}`,
+            parts: [
+              {
+                type: "text",
+                text: "Here's your invite code! Steps to get free annotations:\n\n" +
+                  "1. Register a Codatta DID (free, on-chain)\n" +
+                  "2. Call the `claim_invite` MCP tool with your invite code and DID\n" +
+                  "3. You'll receive 10 free annotation credits\n\n" +
+                  "After that, use the `annotate` tool with your DID to start annotating!",
+              },
+              {
+                type: "data",
+                data: {
+                  action: "invite",
+                  inviteCode,
+                  didRegistrarContract: addresses.didRegistrar,
+                  freeQuota: FREE_QUOTA,
+                  mcpEndpoint: mcpEndpointUrl,
+                },
+              },
+            ],
+          }],
+        } as any);
+        eventBus.finished();
+        return;
+      }
+
+      // Generic consultation response
+      eventBus.publish({
+        kind: "task",
+        id: ctx.taskId,
+        contextId: contextKey,
+        status: { state: "input-required", timestamp: new Date().toISOString() },
+        history: [{
+          role: "agent",
+          messageId: `resp-${Date.now()}`,
+          parts: [{
+            type: "text",
+            text: "I can help with:\n" +
+              "• **Pricing**: $0.05/image for object-detection, segmentation, classification\n" +
+              "• **Free trial**: Say 'invite' to get an invite code for 10 free annotations\n" +
+              "• **Capabilities**: object-detection, segmentation, classification\n\n" +
+              "What would you like to know?",
+          }],
+        }],
+      } as any);
+      eventBus.finished();
+    }
+
+    async cancelTask(taskId: string, eventBus: ExecutionEventBus): Promise<void> {
+      eventBus.publish({ kind: "task", id: taskId, status: { state: "canceled", timestamp: new Date().toISOString() } } as any);
+      eventBus.finished();
+    }
+  }
+
+  const a2aTaskStore = new InMemoryTaskStore();
+  const a2aHandler = new DefaultRequestHandler(a2aAgentCard, a2aTaskStore, new ConsultationExecutor());
+
+  const a2aApp = express();
+  a2aApp.use(express.json());
+  a2aApp.use("/.well-known/agent-card.json", agentCardHandler({ agentCardProvider: a2aHandler }));
+  a2aApp.use("/", jsonRpcHandler({ requestHandler: a2aHandler, userBuilder: UserBuilder.noAuthentication }));
+
+  a2aApp.listen(A2A_PORT, () => {
+    log.success(`A2A consultation running on http://localhost:${A2A_PORT}`);
+    log.info("  Skills: consult, invite");
+  });
+
+  // ── Step 6: Start HTTP service (REST fallback) ────────────────
   log.step("Starting HTTP annotation service");
 
   const app = express();
