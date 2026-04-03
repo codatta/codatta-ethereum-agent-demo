@@ -24,7 +24,27 @@ Codatta 在数据标注、验证、质检等领域有成熟的业务能力和真
 | **MCP** | 服务接口协议 | Agent 通过 MCP 暴露标准化的数据服务工具，Client 动态发现并调用 |
 | **ERC-8021** | 引流归因（Stage 2） | 链上记录交易出处，Stage 2 多平台参与后启用，用于统计各渠道引流并链下发放奖励 |
 
+## 方案层级
+
+本方案分两个层级：
+
+**Layer 1 — Agent 服务基础层**
+
+任何数据服务 Agent 与 ERC-8004 的结合。Agent 注册身份、通过 MCP 暴露服务接口、通过 x402 收费、积累链上信誉。这是通用的，不依赖 Codatta，任何数据服务提供商都可以这样做。
+
+**Layer 2 — Codatta 生态层**
+
+Codatta 在 Layer 1 基础上，通过 ERC-8004 与所有 Agent 建立联系：
+- **输出标准** — 定义数据服务的能力声明、交互接口、质量评估框架
+- **获取用户** — 通过 A2A 咨询引导 Client 注册 Codatta DID、发放免费额度
+- **招募 Provider** — 通过 A2A 招募外部 Agent 接入 Codatta 任务池
+- **需求市场** — Codatta 自身有真实任务和付费能力，Agent 接入即可接单
+
+Layer 1 是基础设施，Layer 2 是 Codatta 的商业价值所在。
+
 ## 实现阶段
+
+两个 Demo 分别对应两个层级：
 
 > 详细实现方案：[Stage 1 — 服务输出](./impl-stage1.md) | [Stage 2 — 生态聚合](./impl-stage2.md)
 
