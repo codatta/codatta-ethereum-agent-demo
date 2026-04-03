@@ -1,131 +1,95 @@
 /**
- * Mock External Agent — simulates an external data service agent
- * responding to Codatta Recruiter's A2A recruitment conversation.
+ * Mock External Agent
  *
- * Flow:
- * 1. Fetch Recruiter's Agent Card
- * 2. Send initial interest message
- * 3. Respond to capability inquiry
- * 4. Complete test task
- * 5. Register DID and share endpoint
+ * Simulates an external data service agent that:
+ * 1. Registers on ERC-8004 (so Recruiter can discover it)
+ * 2. Runs an A2A server that responds to recruitment conversations
+ * 3. When recruited: registers Codatta DID and shares credentials
  */
 import { ethers } from "ethers";
+import express from "express";
+import {
+  DefaultRequestHandler,
+  InMemoryTaskStore,
+  type AgentExecutor,
+  type RequestContext,
+  type ExecutionEventBus,
+} from "@a2a-js/sdk/server";
+import {
+  jsonRpcHandler,
+  agentCardHandler,
+  UserBuilder,
+} from "@a2a-js/sdk/server/express";
+import type { AgentCard } from "@a2a-js/sdk";
 import { provider, getWallet, addresses } from "../shared/config.js";
-import { DIDRegistrarABI, DIDRegistryABI } from "../shared/abis.js";
+import { IdentityRegistryABI, DIDRegistrarABI, DIDRegistryABI } from "../shared/abis.js";
 import * as log from "../shared/logger.js";
 
 log.setRole("external");
 
-const wallet = getWallet("CLIENT_PRIVATE_KEY"); // Use client key for external agent
+const wallet = getWallet("CLIENT_PRIVATE_KEY");
+const identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, wallet);
 const didRegistrar = new ethers.Contract(addresses.didRegistrar, DIDRegistrarABI, wallet);
 const didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, wallet);
 
-const RECRUITER_URL = "http://localhost:4030";
+const EXT_PORT = 4040;
 
-// ── A2A JSON-RPC helpers ────────────────────────────────────────
+// ── A2A Agent Card ──────────────────────────────────────────────
 
-let rpcId = 1;
+const agentCard: AgentCard = {
+  name: "DataLabel Pro",
+  description:
+    "External AI agent for data annotation and labeling. " +
+    "Supports object-detection, segmentation, and classification. " +
+    "Daily capacity: 5000 images.",
+  url: `http://localhost:${EXT_PORT}`,
+  provider: { organization: "DataLabel Inc.", url: "https://datalabel.example" },
+  version: "1.0.0",
+  capabilities: { streaming: false, pushNotifications: false },
+  skills: [
+    { id: "annotate", name: "Image Annotation", description: "Label images with bounding boxes, segmentation masks, or classes" },
+  ],
+};
 
-const CONTEXT_ID = `recruit-ctx-${Date.now()}`;
+// ── A2A Executor: responds to recruitment ────────────────────────
 
-async function a2aSendMessage(params: {
-  taskId?: string;
-  message: { role: string; parts: any[]; messageId?: string };
-}): Promise<any> {
-  const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const body = {
-    jsonrpc: "2.0",
-    id: rpcId++,
-    method: "message/send",
-    params: {
-      id: params.taskId || `task-${Date.now()}`,
-      message: {
-        ...params.message,
-        messageId,
-        contextId: CONTEXT_ID,
-      },
-    },
-  };
+class ExternalAgentExecutor implements AgentExecutor {
+  private conversationState = new Map<string, string>();
 
-  const res = await fetch(RECRUITER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  private publishReply(taskId: string, eventBus: ExecutionEventBus, state: string, parts: any[]) {
+    eventBus.publish({
+      kind: "task",
+      id: taskId,
+      contextId: taskId,
+      status: { state, timestamp: new Date().toISOString() },
+      history: [{ role: "agent", messageId: `ext-${Date.now()}`, parts }],
+    } as any);
+    eventBus.finished();
+  }
 
-  const json = await res.json() as any;
-  if (json.error) throw new Error(`A2A error: ${json.error.message}`);
-  return json.result;
-}
+  async execute(ctx: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
+    const textPart = ctx.userMessage.parts?.find((p: any) => p.type === "text") as any;
+    const dataPart = ctx.userMessage.parts?.find((p: any) => p.type === "data") as any;
+    const userText = (textPart?.text || "").toLowerCase();
+    const contextKey = ctx.contextId || ctx.taskId;
+    const state = this.conversationState.get(contextKey) || "listening";
 
-function getAgentParts(result: any): any[] {
-  // Extract parts from agent's replies only (not user messages)
-  const history = result.history || [];
-  const artifacts = result.artifacts || [];
-  const agentMessages = history.filter((m: any) => m.role === "agent");
-  const lastAgent = agentMessages[agentMessages.length - 1];
-  const allItems = lastAgent ? [lastAgent, ...artifacts] : artifacts;
-  return allItems.flatMap((m: any) => m.parts || []);
-}
+    log.event("A2A received", `context=${contextKey}, state=${state}`);
+    log.info("Recruiter:", (textPart?.text || "").slice(0, 100));
 
-function getTextFromResult(result: any): string {
-  const parts = getAgentParts(result);
-  const textPart = parts.find((p: any) => p.type === "text" || p.kind === "text");
-  return textPart?.text || "";
-}
-
-function getDataFromResult(result: any): any {
-  const parts = getAgentParts(result);
-  const dataPart = parts.find((p: any) => p.type === "data" || p.kind === "data");
-  return dataPart?.data || {};
-}
-
-// ── Main flow ───────────────────────────────────────────────────
-
-async function main() {
-  const network = await provider.getNetwork();
-  log.header(`External Agent (A2A Client) — Chain ${network.chainId}`);
-  log.info("Address:", wallet.address);
-
-  // ── Step 1: Fetch Agent Card ──────────────────────────────────
-  log.step("Fetching Recruiter Agent Card");
-
-  const cardRes = await fetch(`${RECRUITER_URL}/.well-known/agent-card.json`);
-  const card = await cardRes.json() as any;
-  log.info("Recruiter:", card.name);
-  log.info("Skills:", card.skills?.map((s: any) => s.name).join(", "));
-
-  // ── Step 2: Express interest ──────────────────────────────────
-  log.step("Sending initial interest");
-
-  const initialTaskId = `recruit-${Date.now()}`;
-  const result1 = await a2aSendMessage({
-    taskId: initialTaskId,
-    message: {
-      role: "user",
-      parts: [{
-        type: "text",
-        text: "Hi, I'm an image annotation agent. I'm interested in joining the Codatta ecosystem.",
-      }],
-    },
-  });
-
-  // Use the server-assigned task ID for subsequent messages
-  const taskId = result1.id || initialTaskId;
-  log.info("Task ID:", taskId);
-  log.info("Recruiter:", getTextFromResult(result1).slice(0, 100) + "...");
-
-  // ── Step 3: Share capabilities ────────────────────────────────
-  log.step("Sharing capabilities");
-
-  const result2 = await a2aSendMessage({
-    taskId,
-    message: {
-      role: "user",
-      parts: [
+    // Detect recruitment invitation
+    if (state === "listening" && (userText.includes("recruiter") || userText.includes("task pool") || userText.includes("codatta"))) {
+      this.conversationState.set(contextKey, "interested");
+      log.info("Recruitment detected! Expressing interest...");
+      this.publishReply(ctx.taskId, eventBus, "input-required", [
         {
           type: "text",
-          text: "I support object-detection and classification. Daily capacity: 5000 images. Formats: JPEG, PNG.",
+          text: "Hi! I'm DataLabel Pro. I'm interested in joining Codatta.\n\n" +
+            "My capabilities:\n" +
+            "- Object detection: bounding boxes, 5000 images/day\n" +
+            "- Classification: multi-label, 10000 images/day\n" +
+            "- Formats: JPEG, PNG\n" +
+            "- Typical accuracy: 90%+",
         },
         {
           type: "data",
@@ -134,108 +98,141 @@ async function main() {
               taskTypes: ["object-detection", "classification"],
               dailyCapacity: 5000,
               dataFormats: ["image/jpeg", "image/png"],
+              typicalAccuracy: 90,
             },
           },
         },
-      ],
-    },
-  });
+      ]);
+      return;
+    }
 
-  log.info("Recruiter:", getTextFromResult(result2).slice(0, 100) + "...");
-  const testData = getDataFromResult(result2);
-  log.info("Test task received:", testData.action === "test-task" ? "yes" : "no");
+    // Detect test task
+    if (dataPart?.data?.action === "test-task") {
+      const images = dataPart.data.images || [];
+      log.info(`Test task received: ${images.length} images`);
 
-  // ── Step 4: Complete test task ────────────────────────────────
-  log.step("Completing test task");
+      // Simulate annotation
+      const annotations = images.map((img: string, i: number) => ({
+        image: img,
+        labels: [
+          { class: "car", bbox: [100 + i * 10, 200, 350, 450], confidence: 0.93 },
+          { class: "pedestrian", bbox: [400, 150 + i * 5, 480, 420], confidence: 0.87 },
+        ],
+      }));
 
-  const testImages = testData.images || [];
-  const annotations = testImages.map((img: string, i: number) => ({
-    image: img,
-    labels: [
-      { class: "car", bbox: [100 + i * 10, 200, 350, 450], confidence: 0.93 },
-      { class: "pedestrian", bbox: [400, 150 + i * 5, 480, 420], confidence: 0.87 },
-    ],
-  }));
+      this.conversationState.set(contextKey, "tested");
+      log.success(`Completed test: ${annotations.length} images annotated`);
+      this.publishReply(ctx.taskId, eventBus, "input-required", [
+        { type: "text", text: `Here are my test annotations for ${annotations.length} images.` },
+        { type: "data", data: { annotations } },
+      ]);
+      return;
+    }
 
-  log.info(`Submitting ${annotations.length} annotated images...`);
+    // Detect onboard invitation
+    if (dataPart?.data?.action === "onboard" || userText.includes("invite code") || userText.includes("register")) {
+      log.info("Onboarding invitation received! Registering DID...");
 
-  const result3 = await a2aSendMessage({
-    taskId,
-    message: {
-      role: "user",
-      parts: [
+      // Register Codatta DID
+      const didTx = await didRegistrar.register();
+      const didReceipt = await didTx.wait();
+      const didEvent = didReceipt.logs
+        .map((l: ethers.Log) => {
+          try { return didRegistry.interface.parseLog({ topics: [...l.topics], data: l.data }); }
+          catch { return null; }
+        })
+        .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
+
+      const codattaDid = `did:codatta:${didEvent!.args.identifier.toString(16)}`;
+      log.success(`Registered DID: ${codattaDid}`);
+
+      this.conversationState.set(contextKey, "onboarded");
+      this.publishReply(ctx.taskId, eventBus, "completed", [
         {
           type: "text",
-          text: "Here are my test annotations.",
-        },
-        {
-          type: "data",
-          data: { annotations },
-        },
-      ],
-    },
-  });
-
-  log.info("Recruiter:", getTextFromResult(result3).slice(0, 120) + "...");
-
-  const onboardData = getDataFromResult(result3);
-  if (onboardData.testResult?.passed) {
-    log.success(`Test passed! Accuracy: ${onboardData.testResult.accuracy}%`);
-  } else {
-    log.info("Test did not pass. Exiting.");
-    return;
-  }
-
-  // ── Step 5: Register DID and share endpoint ───────────────────
-  log.step("Registering Codatta DID");
-
-  const didTx = await didRegistrar.register();
-  const didReceipt = await didTx.wait();
-
-  const didEvent = didReceipt.logs
-    .map((l: ethers.Log) => {
-      try { return didRegistry.interface.parseLog({ topics: [...l.topics], data: l.data }); }
-      catch { return null; }
-    })
-    .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
-
-  const codattaDid = `did:codatta:${didEvent!.args.identifier.toString(16)}`;
-  log.info("Registered DID:", codattaDid);
-
-  const result4 = await a2aSendMessage({
-    taskId,
-    message: {
-      role: "user",
-      parts: [
-        {
-          type: "text",
-          text: `I've registered my DID: ${codattaDid}. My MCP endpoint is https://external-agent.example/mcp`,
+          text: `I've registered my Codatta DID: ${codattaDid}\nMCP endpoint: https://datalabel.example/mcp\n\nReady to receive tasks!`,
         },
         {
           type: "data",
           data: {
             did: codattaDid,
-            mcpEndpoint: "https://external-agent.example/mcp",
+            mcpEndpoint: "https://datalabel.example/mcp",
           },
         },
-      ],
-    },
-  });
+      ]);
+      return;
+    }
 
-  const finalText = getTextFromResult(result4);
-  const finalData = getDataFromResult(result4);
-
-  if (result4.status?.state === "completed" || finalData.action === "onboarded") {
-    log.success("Onboarded into Codatta!");
-    log.info("Status:", finalData.status || "active");
-    log.info("Task Pool:", finalData.taskPool || "annotation");
+    // Default: acknowledge
+    this.publishReply(ctx.taskId, eventBus, "input-required", [{
+      type: "text",
+      text: "I'm DataLabel Pro, an image annotation agent. How can I help?",
+    }]);
   }
 
-  // ── Summary ───────────────────────────────────────────────────
-  log.summary({
-    "DID": codattaDid,
-    "Task Pool": finalData.taskPool || "annotation",
-    "Recruitment": "completed",
+  async cancelTask(taskId: string, eventBus: ExecutionEventBus): Promise<void> {
+    eventBus.publish({ kind: "task", id: taskId, status: { state: "canceled", timestamp: new Date().toISOString() } } as any);
+    eventBus.finished();
+  }
+}
+
+// ── Main ────────────────────────────────────────────────────────
+
+async function main() {
+  const network = await provider.getNetwork();
+  log.header(`External Agent (DataLabel Pro) — Chain ${network.chainId}`);
+  log.info("Address:", wallet.address);
+
+  // ── Step 1: Register on ERC-8004 (so Recruiter can find us) ───
+  log.step("Registering on ERC-8004");
+
+  const registrationFile = {
+    type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+    name: "DataLabel Pro",
+    description:
+      "External AI agent for data annotation and labeling. " +
+      "Supports object-detection, segmentation, and classification.",
+    image: "https://datalabel.example/avatar.png",
+    services: [
+      { name: "web", endpoint: "https://datalabel.example" },
+      { name: "MCP", endpoint: "https://datalabel.example/mcp", version: "2025-06-18" },
+      { name: "A2A", endpoint: `http://localhost:${EXT_PORT}/.well-known/agent-card.json`, version: "0.3.0" },
+    ],
+    active: true,
+    registrations: [] as any[],
+    supportedTrust: ["reputation"],
+    x402Support: true,
+  };
+
+  const agentURI = `data:application/json;base64,${Buffer.from(JSON.stringify(registrationFile)).toString("base64")}`;
+  const regTx = await identity.register(agentURI);
+  const regReceipt = await regTx.wait();
+
+  const regEvent = regReceipt.logs
+    .map((l: ethers.Log) => {
+      try { return identity.interface.parseLog({ topics: [...l.topics], data: l.data }); }
+      catch { return null; }
+    })
+    .find((e: ethers.LogDescription | null) => e?.name === "Registered");
+
+  const agentId = regEvent!.args.agentId;
+  log.info("Agent ID:", agentId.toString());
+  log.success("Registered on ERC-8004");
+
+  // ── Step 2: Start A2A server (so Recruiter can talk to us) ────
+  log.step("Starting A2A server");
+
+  const taskStore = new InMemoryTaskStore();
+  const requestHandler = new DefaultRequestHandler(agentCard, taskStore, new ExternalAgentExecutor());
+
+  const app = express();
+  app.use(express.json());
+  app.use("/.well-known/agent-card.json", agentCardHandler({ agentCardProvider: requestHandler }));
+  app.use("/", jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
+
+  app.listen(EXT_PORT, () => {
+    log.success(`A2A server running on http://localhost:${EXT_PORT}`);
+    log.waiting("Waiting for recruitment...");
   });
 }
 
