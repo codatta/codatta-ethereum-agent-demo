@@ -232,8 +232,6 @@ async function main() {
     "Status": result.status,
   });
 
-  // Cleanup
-  try { fs.unlinkSync(AGENT_INFO_FILE); } catch {}
 }
 
 main().catch((err) => {

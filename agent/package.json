@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start:provider": "tsx src/provider/index.ts",
-    "start:client": "tsx src/client/index.ts"
+    "start:client": "tsx src/client/index.ts",
+    "query": "tsx src/query/index.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
