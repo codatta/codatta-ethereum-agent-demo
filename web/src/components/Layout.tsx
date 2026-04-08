@@ -11,7 +11,6 @@ export function Layout() {
           </Link>
           <Link to="/" style={navStyle}>Status</Link>
           <Link to="/agents" style={navStyle}>Agents</Link>
-          <Link to="/register-did" style={navStyle}>Register DID</Link>
           <Link to="/register-agent" style={navStyle}>Register Agent</Link>
         </nav>
         <ConnectButton />

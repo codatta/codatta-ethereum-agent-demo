@@ -2,6 +2,22 @@ import { useState } from 'react'
 import { useAccount, useWriteContract, usePublicClient } from 'wagmi'
 import { parseAbi, decodeEventLog, encodeAbiParameters, toHex } from 'viem'
 import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
+import { Link } from 'react-router-dom'
+
+const STEPS = [
+  {
+    title: 'Register Codatta DID',
+    description: 'Create an on-chain decentralized identity (DID) for your Agent. This is free and generates a unique identifier (did:codatta:xxx) that serves as your Agent\'s permanent identity in the Codatta ecosystem.',
+  },
+  {
+    title: 'Register on ERC-8004',
+    description: 'Register your Agent in the ERC-8004 Identity Registry. This creates an NFT-based agent identity with a registration file containing your Agent\'s name, description, and service endpoints. Other agents and clients can discover you through this registry.',
+  },
+  {
+    title: 'Link DID ↔ ERC-8004',
+    description: 'Establish bidirectional linkage between your Codatta DID and ERC-8004 agent identity. This writes a reference from ERC-8004 to your DID (via metadata), and from your DID to ERC-8004 (via service endpoint). Anyone can verify the two identities belong to the same Agent.',
+  },
+]
 
 export function RegisterAgent() {
   const { isConnected } = useAccount()
@@ -12,7 +28,7 @@ export function RegisterAgent() {
   const [description, setDescription] = useState('AI agent for data annotation services.')
   const [webEndpoint, setWebEndpoint] = useState('http://localhost:4021')
 
-  const [step, setStep] = useState(0) // 0=form, 1=registering DID, 2=registering agent, 3=linking, 4=done
+  const [step, setStep] = useState(0) // 0=form, 1/2/3=in progress, 4=done
   const [didHex, setDidHex] = useState('')
   const [agentId, setAgentId] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +58,7 @@ export function RegisterAgent() {
           }
         } catch {}
       }
-      if (!didIdentifier) throw new Error('DID registration failed')
+      if (!didIdentifier) throw new Error('DID registration failed — no event emitted')
       const hex = didIdentifier.toString(16)
       setDidHex(hex)
 
@@ -80,12 +96,11 @@ export function RegisterAgent() {
           }
         } catch {}
       }
-      if (!aid) throw new Error('Agent registration failed')
+      if (!aid) throw new Error('Agent registration failed — no event emitted')
       setAgentId(aid.toString())
 
       // Step 3: Link DID ↔ ERC-8004
       setStep(3)
-      // ERC-8004 → DID
       const didBytes = encodeAbiParameters([{ type: 'uint128' }], [didIdentifier])
       await writeContractAsync({
         address: addresses.identityRegistry,
@@ -94,7 +109,6 @@ export function RegisterAgent() {
         args: [aid, 'codatta:did', didBytes],
       })
 
-      // DID → ERC-8004
       const serviceEndpoint = JSON.stringify({
         id: `did:codatta:${hex}#erc8004`,
         type: 'ERC8004Agent',
@@ -122,15 +136,22 @@ export function RegisterAgent() {
     )
   }
 
+  // Done
   if (step === 4) {
     return (
       <div>
         <h2>Agent Registered!</h2>
-        <div style={{ padding: 16, background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0' }}>
+        <div style={{ padding: 20, background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0' }}>
           <p><strong>Agent ID:</strong> <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{agentId}</span></p>
-          <p><strong>DID:</strong> <span style={{ fontFamily: 'monospace' }}>did:codatta:{didHex}</span></p>
+          <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>did:codatta:{didHex}</Link></p>
           <p><strong>Name:</strong> {name}</p>
-          <p style={{ margin: 0, color: '#166534' }}>DID ↔ ERC-8004 bidirectional linkage established.</p>
+          <p style={{ margin: '12px 0 0', color: '#166534' }}>
+            ✅ All three steps completed. DID ↔ ERC-8004 bidirectional linkage established.
+          </p>
+          <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
+            <Link to={`/agent/${agentId}`} style={linkBtnStyle}>View Agent</Link>
+            <Link to={`/did/${didHex}`} style={{ ...linkBtnStyle, background: '#6366f1' }}>View DID</Link>
+          </div>
         </div>
       </div>
     )
@@ -139,16 +160,59 @@ export function RegisterAgent() {
   return (
     <div>
       <h2>Register Agent</h2>
-      <p style={{ color: '#666' }}>Register a new Agent with Codatta DID + ERC-8004 identity.</p>
+      <p style={{ color: '#666', marginBottom: 24 }}>
+        Register a new Agent with Codatta DID + ERC-8004 identity. Three on-chain transactions will be sent.
+      </p>
 
+      {/* Step progress */}
+      {step > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          {STEPS.map((s, i) => {
+            const stepNum = i + 1
+            const isActive = step === stepNum
+            const isDone = step > stepNum
+            return (
+              <div key={i} style={{
+                padding: 14, marginBottom: 8, borderRadius: 8,
+                border: `1px solid ${isDone ? '#bbf7d0' : isActive ? '#93c5fd' : '#e5e7eb'}`,
+                background: isDone ? '#f0fdf4' : isActive ? '#eff6ff' : '#fafafa',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 18 }}>
+                    {isDone ? '✅' : isActive ? '⏳' : '⬜'}
+                  </span>
+                  <div>
+                    <strong style={{ fontSize: 14 }}>Step {stepNum}: {s.title}</strong>
+                    {isActive && (
+                      <p style={{ margin: '6px 0 0', fontSize: 13, color: '#4b5563' }}>{s.description}</p>
+                    )}
+                    {isDone && stepNum === 1 && didHex && (
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: '#166534', fontFamily: 'monospace' }}>
+                        did:codatta:{didHex}
+                      </p>
+                    )}
+                    {isDone && stepNum === 2 && agentId && (
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: '#166534', fontFamily: 'monospace' }}>
+                        agentId: {agentId.slice(0, 20)}...
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Form */}
       <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
         <label>
-          <span style={labelStyle}>Name</span>
+          <span style={labelStyle}>Agent Name</span>
           <input value={name} onChange={e => setName(e.target.value)} style={inputStyle} disabled={step > 0} />
         </label>
         <label>
           <span style={labelStyle}>Description</span>
-          <textarea value={description} onChange={e => setDescription(e.target.value)} style={{ ...inputStyle, height: 80 }} disabled={step > 0} />
+          <textarea value={description} onChange={e => setDescription(e.target.value)} style={{ ...inputStyle, height: 80, resize: 'vertical' }} disabled={step > 0} />
         </label>
         <label>
           <span style={labelStyle}>Web Endpoint</span>
@@ -156,10 +220,7 @@ export function RegisterAgent() {
         </label>
 
         <button onClick={handleRegister} disabled={step > 0} style={{ ...btnStyle, opacity: step > 0 ? 0.6 : 1 }}>
-          {step === 0 ? 'Register Agent' :
-           step === 1 ? 'Step 1/3: Registering DID...' :
-           step === 2 ? 'Step 2/3: Registering Agent...' :
-           'Step 3/3: Linking DID ↔ ERC-8004...'}
+          {step === 0 ? 'Register Agent (3 transactions)' : 'Processing...'}
         </button>
       </div>
 
@@ -172,10 +233,14 @@ export function RegisterAgent() {
   )
 }
 
-const labelStyle: React.CSSProperties = { display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4 }
-const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' }
+const labelStyle: React.CSSProperties = { display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4, color: '#374151' }
+const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, boxSizing: 'border-box' }
 const btnStyle: React.CSSProperties = {
   padding: '10px 24px', borderRadius: 8, border: 'none',
   background: '#4f46e5', color: 'white', fontSize: 14,
-  cursor: 'pointer', fontWeight: 'bold',
+  cursor: 'pointer', fontWeight: 'bold', marginTop: 8,
+}
+const linkBtnStyle: React.CSSProperties = {
+  padding: '8px 16px', borderRadius: 6, background: '#4f46e5',
+  color: 'white', textDecoration: 'none', fontSize: 13,
 }
