@@ -315,7 +315,7 @@ async function main() {
             try {
               if (clientAddress) {
                 feedbackAuth = await buildFeedbackAuth({
-                  agentId, clientAddress, indexLimit: 1,
+                  agentId, clientAddress, indexLimit: 100,
                   expiry: Math.floor(Date.now() / 1000) + 86400,
                   chainId: network.chainId,
                   identityRegistry: addresses.identityRegistry,
@@ -617,7 +617,7 @@ async function main() {
         feedbackAuth = await buildFeedbackAuth({
           agentId,
           clientAddress,
-          indexLimit: 1,
+          indexLimit: 100,
           expiry: Math.floor(Date.now() / 1000) + 86400,
           chainId: network.chainId,
           identityRegistry: addresses.identityRegistry,
