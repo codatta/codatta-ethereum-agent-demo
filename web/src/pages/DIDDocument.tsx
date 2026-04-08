@@ -10,7 +10,7 @@ export function DIDDocumentPage() {
 
   return (
     <div>
-      <Link to="/" style={{ fontSize: 13, color: '#666' }}>&larr; Back</Link>
+      <Link to="/agents" style={{ fontSize: 13, color: '#666' }}>&larr; Back</Link>
       <h2>did:codatta:{doc.idHex}</h2>
 
       <section style={sectionStyle}>

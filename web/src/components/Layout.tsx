@@ -9,7 +9,8 @@ export function Layout() {
           <Link to="/" style={{ fontSize: 18, fontWeight: 'bold', textDecoration: 'none', color: '#333' }}>
             Codatta Demo
           </Link>
-          <Link to="/" style={navStyle}>Agents</Link>
+          <Link to="/" style={navStyle}>Status</Link>
+          <Link to="/agents" style={navStyle}>Agents</Link>
           <Link to="/register-did" style={navStyle}>Register DID</Link>
           <Link to="/register-agent" style={navStyle}>Register Agent</Link>
         </nav>

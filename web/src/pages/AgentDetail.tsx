@@ -12,7 +12,7 @@ export function AgentDetail() {
 
   return (
     <div>
-      <Link to="/" style={{ fontSize: 13, color: '#666' }}>&larr; Back to list</Link>
+      <Link to="/agents" style={{ fontSize: 13, color: '#666' }}>&larr; Back to list</Link>
       <h2>{reg?.name || `Agent ${agentId?.slice(0, 12)}...`}</h2>
 
       {/* Basic Info */}
