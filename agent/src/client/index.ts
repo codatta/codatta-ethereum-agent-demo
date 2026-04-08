@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import fs from "fs";
 import path from "path";
+import readline from "readline";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { provider, getWallet, addresses } from "../shared/config.js";
@@ -18,6 +19,16 @@ const didRegistrar = new ethers.Contract(addresses.didRegistrar, DIDRegistrarABI
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, wallet);
 
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
+
+function askUser(question: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase());
+    });
+  });
+}
 
 async function discoverAgentId(): Promise<bigint> {
   log.info("Querying marketplace for agents... (reading agent-info.json)");
@@ -143,7 +154,24 @@ async function main() {
       log.success(`Invite code received: ${inviteData.inviteCode.slice(0, 18)}...`);
       log.info(`Free quota: ${inviteData.freeQuota} images`);
 
-      // ── Step 3: Register Codatta DID ────────────────────────────
+      // ── Step 3: Register Codatta DID (with user confirmation) ────
+      log.step("Register Codatta DID?");
+      log.info(`Benefits: ${inviteData.freeQuota} free annotation credits`);
+      log.info("Cost: Free (on-chain transaction)");
+
+      const answer = await askUser("\n  Register Codatta DID and claim free quota? (y/n): ");
+
+      if (answer !== "y" && answer !== "yes") {
+        log.info("Declined. Skipping DID registration and free quota.");
+        log.info("You can still use the annotation service with x402 payment.");
+        log.summary({
+          "Agent ID": agentId.toString(),
+          "DID Registration": "Declined",
+          "Protocol": "A2A (consult only)",
+        });
+        return;
+      }
+
       log.step("Registering Codatta DID");
 
       const didTx = await didRegistrar.register();
