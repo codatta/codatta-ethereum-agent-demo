@@ -161,33 +161,30 @@ async function main() {
 
       const answer = await askUser("\n  Register Codatta DID and claim free quota? (y/n): ");
 
-      if (answer !== "y" && answer !== "yes") {
-        log.info("Declined. Skipping DID registration and free quota.");
-        log.info("You can still use the annotation service with x402 payment.");
-        log.summary({
-          "Agent ID": agentId.toString(),
-          "DID Registration": "Declined",
-          "Protocol": "A2A (consult only)",
-        });
-        return;
+      let clientDid: string | null = null;
+      const accepted = answer === "y" || answer === "yes";
+
+      if (accepted) {
+        // ── Step 3b: Register DID + Claim invite ──────────────────
+        log.step("Registering Codatta DID");
+
+        const didTx = await didRegistrar.register();
+        const didReceipt = await didTx.wait();
+        const didEvent = didReceipt.logs
+          .map((l: ethers.Log) => {
+            try { return didRegistry.interface.parseLog({ topics: [...l.topics], data: l.data }); }
+            catch { return null; }
+          })
+          .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
+
+        clientDid = `did:codatta:${didEvent!.args.identifier.toString(16)}`;
+        log.success(`Registered DID: ${clientDid}`);
+      } else {
+        log.info("Declined DID registration. Proceeding without free quota.");
       }
 
-      log.step("Registering Codatta DID");
-
-      const didTx = await didRegistrar.register();
-      const didReceipt = await didTx.wait();
-      const didEvent = didReceipt.logs
-        .map((l: ethers.Log) => {
-          try { return didRegistry.interface.parseLog({ topics: [...l.topics], data: l.data }); }
-          catch { return null; }
-        })
-        .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
-
-      const clientDid = `did:codatta:${didEvent!.args.identifier.toString(16)}`;
-      log.success(`Registered DID: ${clientDid}`);
-
-      // ── Step 4: Claim invite via MCP ────────────────────────────
-      log.step("Claiming invite code via MCP");
+      // ── Step 4: Connect MCP and use annotation service ──────────
+      log.step(accepted ? "Claiming invite + requesting annotation" : "Requesting annotation (paid mode)");
 
       const mcpClient = new Client({ name: "codatta-client", version: "1.0.0" });
       const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint));
@@ -196,17 +193,18 @@ async function main() {
       const { tools } = await mcpClient.listTools();
       log.info(`Discovered ${tools.length} tool(s): ${tools.map(t => t.name).join(", ")}`);
 
-      const claimResult = await mcpClient.callTool({
-        name: "claim_invite",
-        arguments: { inviteCode: inviteData.inviteCode, clientDid },
-      });
-      const claimText = claimResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
-      const claimData = claimText ? JSON.parse(claimText.text) : {};
-      log.success(`Invite claimed! Free quota: ${claimData.freeQuota} images`);
+      // Claim invite if registered
+      if (accepted && clientDid) {
+        const claimResult = await mcpClient.callTool({
+          name: "claim_invite",
+          arguments: { inviteCode: inviteData.inviteCode, clientDid },
+        });
+        const claimText = claimResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
+        const claimData = claimText ? JSON.parse(claimText.text) : {};
+        log.success(`Invite claimed! Free quota: ${claimData.freeQuota} images`);
+      }
 
-      // ── Step 5: Annotate with free quota ──────────────────────────
-      log.step("Requesting annotation (using free quota)");
-
+      // ── Step 5: Annotate ──────────────────────────────────────────
       const images = [
         "https://example.com/street-001.jpg",
         "https://example.com/street-002.jpg",
@@ -214,6 +212,11 @@ async function main() {
       ];
 
       log.info(`Calling annotate: ${images.length} images, task=object-detection`);
+      if (accepted) {
+        log.info("(using free quota)");
+      } else {
+        log.info("(no free quota — x402 payment would be required in production)");
+      }
 
       const submitResult = await mcpClient.callTool({
         name: "annotate",
@@ -221,7 +224,7 @@ async function main() {
           images,
           task: "object-detection",
           clientAddress: wallet.address,
-          clientDid,
+          ...(clientDid ? { clientDid } : {}),
         },
       });
       const submitText = submitResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
@@ -273,8 +276,8 @@ async function main() {
       const score = await reputation.getScore(agentId);
       log.summary({
         "Agent ID": agentId.toString(),
-        "Client DID": clientDid,
-        "Free Quota Used": `${images.length} images`,
+        "Client DID": clientDid || "Not registered",
+        "Payment": accepted ? `Free quota (${images.length} images)` : "Paid (x402)",
         "Reputation Score": score.toString(),
         "Annotations": `${result.annotations.length} images`,
         "Protocol": "A2A (consult) → MCP (execute)",
