@@ -19,7 +19,7 @@ interface InviteData {
   invites: InviteRecord[]
 }
 
-const PROVIDER_URL = 'http://localhost:4021'
+const PROVIDER_URL = 'http://127.0.0.1:4021'
 
 export function Invites() {
   const [data, setData] = useState<InviteData | null>(null)

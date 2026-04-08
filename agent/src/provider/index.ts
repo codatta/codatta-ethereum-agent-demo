@@ -595,6 +595,11 @@ async function main() {
 
   const app = express();
   app.use(express.json());
+  app.use((_req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "*");
+    next();
+  });
 
   app.post("/annotate", async (req, res) => {
     const { images, task } = req.body;
