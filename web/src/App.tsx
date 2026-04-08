@@ -5,6 +5,7 @@ import { AgentList } from './pages/AgentList'
 import { AgentDetail } from './pages/AgentDetail'
 import { DIDDocumentPage } from './pages/DIDDocument'
 import { RegisterAgent } from './pages/RegisterAgent'
+import { Invites } from './pages/Invites'
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/agent/:agentId" element={<AgentDetail />} />
           <Route path="/did/:identifier" element={<DIDDocumentPage />} />
           <Route path="/register-agent" element={<RegisterAgent />} />
+          <Route path="/invites" element={<Invites />} />
         </Route>
       </Routes>
     </BrowserRouter>

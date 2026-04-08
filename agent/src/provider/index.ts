@@ -42,21 +42,48 @@ const MCP_PORT = PROVIDER_PORT + 1;
 const A2A_PORT = PROVIDER_PORT + 2;
 
 // ── Invite code + free quota ────────────────────────────────────
-const FREE_QUOTA = 10; // free annotations per invite code
+const FREE_QUOTA = 10;
 const freeQuotaStore = new Map<string, number>(); // did → remaining free count
 
+interface InviteRecord {
+  inviteCode: string
+  clientAddress: string
+  clientDid: string | null
+  freeQuota: number
+  usedQuota: number
+  claimedAt: string | null
+  createdAt: string
+}
+const inviteRecords: InviteRecord[] = [];
+
 function generateInviteCode(providerAddress: string, clientAddress: string): string {
-  // Invite code = keccak256(provider + client + timestamp) — Provider can prove authorship
   const payload = ethers.solidityPackedKeccak256(
     ["address", "address", "uint256"],
     [providerAddress, clientAddress, Math.floor(Date.now() / 1000)]
   );
+  inviteRecords.push({
+    inviteCode: payload,
+    clientAddress,
+    clientDid: null,
+    freeQuota: FREE_QUOTA,
+    usedQuota: 0,
+    claimedAt: null,
+    createdAt: new Date().toISOString(),
+  });
   return payload;
 }
 
-function grantFreeQuota(did: string) {
+function grantFreeQuota(did: string, inviteCode?: string) {
   const current = freeQuotaStore.get(did) || 0;
   freeQuotaStore.set(did, current + FREE_QUOTA);
+  // Update invite record
+  if (inviteCode) {
+    const record = inviteRecords.find(r => r.inviteCode === inviteCode);
+    if (record) {
+      record.clientDid = did;
+      record.claimedAt = new Date().toISOString();
+    }
+  }
   log.info(`Free quota granted: ${did} → ${current + FREE_QUOTA} images`);
 }
 
@@ -64,6 +91,8 @@ function consumeFreeQuota(did: string, count: number): boolean {
   const remaining = freeQuotaStore.get(did) || 0;
   if (remaining >= count) {
     freeQuotaStore.set(did, remaining - count);
+    const record = inviteRecords.find(r => r.clientDid === did);
+    if (record) record.usedQuota += count;
     return true;
   }
   return false;
@@ -360,8 +389,7 @@ async function main() {
       },
       async ({ inviteCode, clientDid }) => {
         log.event("MCP tool call", `claim_invite: did=${clientDid}`);
-        // In production: verify invite code signature on-chain
-        grantFreeQuota(clientDid);
+        grantFreeQuota(clientDid, inviteCode);
         const remaining = freeQuotaStore.get(clientDid) || 0;
         return {
           content: [{ type: "text" as const, text: JSON.stringify({
@@ -603,6 +631,25 @@ async function main() {
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", agentId: agentId.toString(), active: true });
+  });
+
+  // Invite records for Web Dashboard
+  app.get("/invites", (_req, res) => {
+    res.json({
+      total: inviteRecords.length,
+      claimed: inviteRecords.filter(r => r.claimedAt).length,
+      invites: inviteRecords.map(r => ({
+        inviteCode: r.inviteCode.slice(0, 18) + "...",
+        clientAddress: r.clientAddress,
+        clientDid: r.clientDid,
+        freeQuota: r.freeQuota,
+        usedQuota: r.usedQuota,
+        remainingQuota: r.clientDid ? (freeQuotaStore.get(r.clientDid) || 0) : r.freeQuota,
+        claimed: !!r.claimedAt,
+        claimedAt: r.claimedAt,
+        createdAt: r.createdAt,
+      })),
+    });
   });
 
   app.listen(PROVIDER_PORT, () => {
