@@ -46,6 +46,14 @@ agent/
     ├── recruiter/    # Recruiter Agent（A2A 招募外部 Agent）
     └── query/        # 查询工具（DID、Agent info、Reputation、Validation）
 
+web/                  # Web Dashboard（React + Vite + wagmi）
+└── src/
+    ├── config/       # 合约地址 + ABI + wagmi 链配置
+    ├── pages/        # Agent 列表/详情、DID 文档、注册页面
+    ├── components/   # Layout、ConnectButton
+    ├── hooks/        # useAgentList、useAgentDetail、useDIDDocument
+    └── lib/          # 工具函数（解析注册文件等）
+
 design/               # 设计文档和规范
 ```
 
@@ -167,10 +175,37 @@ npm run query
 npm run query -- <agentId>
 ```
 
+## Web Dashboard
+
+可视化展示 Agent 身份、DID 文档、信誉评分、验证记录，支持注册 DID 和 Agent。
+
+### 启动前端
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+浏览器打开 http://localhost:5173
+
+### 页面
+
+| 路径 | 功能 |
+|------|------|
+| `/` | Agent 列表（从链上事件枚举） |
+| `/agent/:id` | Agent 详情（注册文件、services、信誉、验证、DID 关联） |
+| `/did/:hex` | DID 文档查看 |
+| `/register-did` | 一键注册 Codatta DID（需连接钱包） |
+| `/register-agent` | 三步注册 Agent：DID → ERC-8004 → 双向关联（需连接钱包） |
+
+> 需要先运行 Provider + Client 填充链上数据，Dashboard 才有内容展示。连接钱包使用 MetaMask，需添加 Anvil 网络（chainId: 31337, RPC: http://127.0.0.1:8545）。
+
 ## 技术栈
 
 - **Solidity** ^0.8.20 + **Foundry** (forge/anvil)
-- **TypeScript** + **ethers.js** v6 + **Express**
+- **TypeScript** + **ethers.js** v6 + **Express**（Agent 端）
+- **React** + **Vite** + **wagmi** + **viem**（Web Dashboard）
 - **MCP** — @modelcontextprotocol/sdk（服务接口发现与调用）
 - **A2A** — @a2a-js/sdk（Agent 间多轮协作）
 - **OpenZeppelin** Contracts v5 (含 Upgradeable)
