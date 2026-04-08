@@ -19,6 +19,7 @@ import {
 } from "@a2a-js/sdk/server/express";
 import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
+import { startAnnotationService } from "./annotation-service.js";
 import { provider, getWallet, addresses, PROVIDER_PORT } from "../shared/config.js";
 import {
   DIDRegistrarABI, DIDRegistryABI,
@@ -81,17 +82,34 @@ interface AnnotationTask {
 }
 
 const taskStore = new Map<string, AnnotationTask>();
+let annotationServiceUrl = ""; // Set after mock service starts
 
-async function executeAnnotation(images: string[], task: string) {
-  await new Promise((r) => setTimeout(r, 2000));
+/**
+ * Call the annotation backend service.
+ * In production: replace annotationServiceUrl with real Codatta API.
+ */
+async function executeAnnotation(images: string[], task: string, labels?: string[]) {
+  // Submit task to backend
+  const submitRes = await fetch(`${annotationServiceUrl}/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ images, taskType: task, labels }),
+  });
+  const { taskId: svcTaskId } = await submitRes.json() as { taskId: string };
 
-  return (images || []).map((img: string, i: number) => ({
-    image: img,
-    labels: [
-      { class: "car", bbox: [100 + i, 200, 300, 400], confidence: 0.95 },
-      { class: "pedestrian", bbox: [400 + i, 150, 500, 450], confidence: 0.88 },
-    ],
-  }));
+  // Poll for completion
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    const statusRes = await fetch(`${annotationServiceUrl}/tasks/${svcTaskId}`);
+    const statusData = await statusRes.json() as any;
+    if (statusData.status === "completed") {
+      return statusData.results as Array<{ image: string; labels: Array<{ class: string; bbox: number[]; confidence: number }> }>;
+    }
+    if (statusData.status === "failed") {
+      throw new Error("Annotation backend task failed");
+    }
+  }
+  throw new Error("Annotation backend task timed out");
 }
 
 async function updateValidation(agentId: bigint) {
@@ -117,6 +135,10 @@ async function main() {
   const network = await provider.getNetwork();
   log.header(`Provider Agent — Chain ${network.chainId}`);
   log.info("Address:", wallet.address);
+
+  // ── Step 0: Start annotation backend ──────────────────────────
+  log.step("Starting annotation backend");
+  annotationServiceUrl = await startAnnotationService();
 
   // ── Step 1: Register Codatta DID ──────────────────────────────
   log.step("Registering Codatta DID");
