@@ -56,7 +56,11 @@ interface InviteRecord {
 }
 const inviteRecords: InviteRecord[] = [];
 
-function generateInviteCode(providerAddress: string, clientAddress: string): string {
+function generateInviteCode(providerAddress: string, clientAddress: string): string | null {
+  // One invite per client address
+  const existing = inviteRecords.find(r => r.clientAddress.toLowerCase() === clientAddress.toLowerCase());
+  if (existing) return null;
+
   const payload = ethers.solidityPackedKeccak256(
     ["address", "address", "uint256"],
     [providerAddress, clientAddress, Math.floor(Date.now() / 1000)]
@@ -523,6 +527,26 @@ async function main() {
         const dataPart = ctx.userMessage.parts?.find((p: any) => p.type === "data") as any;
         const clientAddress = dataPart?.data?.clientAddress || "";
         const inviteCode = generateInviteCode(wallet.address, clientAddress);
+
+        if (!inviteCode) {
+          // Already invited
+          eventBus.publish({
+            kind: "task",
+            id: ctx.taskId,
+            contextId: contextKey,
+            status: { state: "completed", timestamp: new Date().toISOString() },
+            history: [{
+              role: "agent",
+              messageId: `resp-${Date.now()}`,
+              parts: [{
+                type: "text",
+                text: "This address has already received an invite code. Each address can only receive one invite.",
+              }],
+            }],
+          } as any);
+          eventBus.finished();
+          return;
+        }
 
         this.conversationState.set(contextKey, "invited");
         eventBus.publish({
