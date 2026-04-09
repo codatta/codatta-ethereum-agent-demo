@@ -71,7 +71,6 @@ export function Invites() {
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
         <StatCard label="Total Invites" value={data.total} />
         <StatCard label="Claimed" value={data.claimed} color="#166534" />
-        <StatCard label="Pending" value={data.total - data.claimed} color="#ca8a04" />
       </div>
 
       {/* Table */}
