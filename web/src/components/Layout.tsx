@@ -16,7 +16,6 @@ export function Layout() {
           <ConnectButton />
         </div>
         <nav style={{ display: 'flex', gap: 6, marginTop: 12, alignItems: 'center' }}>
-          <NavLink to="/" current={pathname} label="Services" />
           {isConnected && (
             <>
               <Sep />
