@@ -150,6 +150,67 @@ async function main() {
     log.info("Provider:", getAgentText(result2).slice(0, 120) + "...");
 
     const inviteData = getAgentData(result2);
+
+    // ── Check if returning user ───────────────────────────────────
+    if (inviteData.action === "returning-user") {
+      log.success(`Welcome back! Already registered: ${inviteData.clientDid}`);
+      log.info(`Free quota remaining: ${inviteData.remainingQuota} images`);
+
+      // Go straight to MCP annotate
+      const mcpClient = new Client({ name: "codatta-client", version: "1.0.0" });
+      const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint));
+      await mcpClient.connect(transport);
+
+      const { tools } = await mcpClient.listTools();
+      log.info(`Discovered ${tools.length} tool(s): ${tools.map(t => t.name).join(", ")}`);
+
+      log.step("Requesting annotation (returning user)");
+      const images = [
+        "https://example.com/street-001.jpg",
+        "https://example.com/street-002.jpg",
+        "https://example.com/street-003.jpg",
+      ];
+      log.info(`Calling annotate: ${images.length} images, task=object-detection`);
+
+      const submitResult = await mcpClient.callTool({
+        name: "annotate",
+        arguments: { images, task: "object-detection", clientAddress: wallet.address, clientDid: inviteData.clientDid },
+      });
+      const submitText = submitResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
+      const submitData = submitText ? JSON.parse(submitText.text) : {};
+      log.info(`Task submitted: ${submitData.taskId} (status: ${submitData.status})`);
+
+      log.info("Polling for completion...");
+      let result: any = null;
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const statusResult = await mcpClient.callTool({ name: "get_task_status", arguments: { taskId: submitData.taskId } });
+        const statusText = statusResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
+        if (!statusText) continue;
+        const statusData = JSON.parse(statusText.text);
+        if (statusData.status === "completed") { result = statusData; break; }
+        if (statusData.status === "failed") throw new Error("Annotation task failed");
+      }
+      if (!result) throw new Error("Task did not complete within timeout");
+
+      log.success(`Annotation received: ${result.annotations.length} images (${result.duration})`);
+      for (const ann of result.annotations) {
+        log.info(`  ${ann.image}: ${ann.labels.map((l: any) => `${l.class}(${l.confidence})`).join(", ")}`);
+      }
+      await mcpClient.close();
+
+      const score = await reputation.getScore(agentId);
+      log.summary({
+        "Agent ID": agentId.toString(),
+        "Client DID": inviteData.clientDid,
+        "Free Quota Remaining": `${inviteData.remainingQuota - images.length} images`,
+        "Reputation Score": score.toString(),
+        "Annotations": `${result.annotations.length} images`,
+        "Status": "Returning user",
+      });
+      return;
+    }
+
     if (inviteData.inviteCode) {
       log.success(`Invite code received: ${inviteData.inviteCode.slice(0, 18)}...`);
       log.info(`Free quota: ${inviteData.freeQuota} images`);

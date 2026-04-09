@@ -526,10 +526,48 @@ async function main() {
       if (userText.includes("invite") || userText.includes("register") || userText.includes("free") || userText.includes("yes")) {
         const dataPart = ctx.userMessage.parts?.find((p: any) => p.type === "data") as any;
         const clientAddress = dataPart?.data?.clientAddress || "";
+
+        // Check if this client already registered
+        const existingRecord = inviteRecords.find(r => r.clientAddress.toLowerCase() === clientAddress.toLowerCase());
+        if (existingRecord?.claimedAt && existingRecord.clientDid) {
+          const remaining = freeQuotaStore.get(existingRecord.clientDid) || 0;
+          eventBus.publish({
+            kind: "task",
+            id: ctx.taskId,
+            contextId: contextKey,
+            status: { state: "completed", timestamp: new Date().toISOString() },
+            history: [{
+              role: "agent",
+              messageId: `resp-${Date.now()}`,
+              parts: [
+                {
+                  type: "text",
+                  text: `Welcome back! You're already registered.\n\n` +
+                    `• DID: ${existingRecord.clientDid}\n` +
+                    `• Free quota remaining: ${remaining} images\n\n` +
+                    `You can use the \`annotate\` MCP tool directly with your DID.`,
+                },
+                {
+                  type: "data",
+                  data: {
+                    action: "returning-user",
+                    clientDid: existingRecord.clientDid,
+                    remainingQuota: remaining,
+                    mcpEndpoint: mcpEndpointUrl,
+                  },
+                },
+              ],
+            }],
+          } as any);
+          eventBus.finished();
+          return;
+        }
+
         const inviteCode = generateInviteCode(wallet.address, clientAddress);
 
         if (!inviteCode) {
-          // Already invited
+          // Invited but not yet claimed
+          const pending = inviteRecords.find(r => r.clientAddress.toLowerCase() === clientAddress.toLowerCase());
           eventBus.publish({
             kind: "task",
             id: ctx.taskId,
@@ -540,7 +578,8 @@ async function main() {
               messageId: `resp-${Date.now()}`,
               parts: [{
                 type: "text",
-                text: "This address has already received an invite code. Each address can only receive one invite.",
+                text: `You already have an invite code (${pending?.inviteCode.slice(0, 18)}...). ` +
+                  "Please register a Codatta DID and use `claim_invite` to activate it.",
               }],
             }],
           } as any);
