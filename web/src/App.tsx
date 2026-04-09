@@ -3,7 +3,6 @@ import { Layout } from './components/Layout'
 import { Services } from './pages/Services'
 import { ServiceDetail } from './pages/ServiceDetail'
 import { AgentDetail } from './pages/AgentDetail'
-import { Guide } from './pages/Guide'
 import { ProviderDashboard } from './pages/ProviderDashboard'
 import { Invites } from './pages/Invites'
 import { RegisterAgent } from './pages/RegisterAgent'
@@ -19,7 +18,6 @@ export default function App() {
           <Route path="/" element={<Services />} />
           <Route path="/service/:type" element={<ServiceDetail />} />
           <Route path="/agent/:agentId" element={<AgentDetail />} />
-          <Route path="/guide" element={<Guide />} />
           {/* Provider */}
           <Route path="/dashboard" element={<ProviderDashboard />} />
           <Route path="/invites" element={<Invites />} />

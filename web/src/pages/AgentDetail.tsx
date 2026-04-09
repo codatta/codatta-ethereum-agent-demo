@@ -66,7 +66,7 @@ export function AgentDetail() {
           </div>
         )}
         <p style={{ margin: '12px 0 0', fontSize: 13 }}>
-          <Link to="/guide">See integration guide →</Link>
+          <Link to="/service/annotation">See integration guide →</Link>
         </p>
       </section>
 

@@ -17,7 +17,6 @@ export function Layout() {
         </div>
         <nav style={{ display: 'flex', gap: 6, marginTop: 12, alignItems: 'center' }}>
           <NavLink to="/" current={pathname} label="Services" />
-          <NavLink to="/guide" current={pathname} label="Guide" />
           {isConnected && (
             <>
               <Sep />

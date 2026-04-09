@@ -154,11 +154,8 @@ export function ServiceDetail() {
         </div>
       )}
 
-      <div style={{ marginTop: 24, padding: 16, background: '#f5f3ff', borderRadius: 8 }}>
-        <p style={{ margin: 0, fontSize: 13 }}>
-          <strong>How to use?</strong> Check the <Link to="/guide">integration guide</Link> for step-by-step instructions.
-        </p>
-      </div>
+      {/* Integration Guide (service-specific) */}
+      {type === 'annotation' && <AnnotationGuide />}
     </div>
   )
 }
@@ -168,6 +165,84 @@ function Tag({ children }: { children: string }) {
     <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: '#eef2ff', color: '#4f46e5' }}>
       {children}
     </span>
+  )
+}
+
+function AnnotationGuide() {
+  return (
+    <div style={{ marginTop: 32 }}>
+      <h3>Integration Guide — Data Annotation</h3>
+      <p style={{ color: '#666', fontSize: 13, marginBottom: 16 }}>
+        Two ways to use this service: quick MCP call, or full flow with A2A consultation and free quota.
+      </p>
+
+      <div style={{ display: 'grid', gap: 16 }}>
+        <GuideSection title="Quick Start (MCP)">
+          <p>Connect to the agent's MCP endpoint and call the <code>annotate</code> tool directly:</p>
+          <Code>{`const client = new Client({ name: "my-client", version: "1.0.0" });
+await client.connect(new StreamableHTTPClientTransport(new URL(mcpEndpoint)));
+
+// Discover tools
+const { tools } = await client.listTools();
+// → annotate, get_task_status, claim_invite
+
+// Submit annotation task (async)
+const result = await client.callTool({
+  name: "annotate",
+  arguments: {
+    images: ["https://example.com/img-001.jpg", "https://example.com/img-002.jpg"],
+    task: "object-detection"
+  }
+});
+// → { taskId: "task-xxx", status: "working" }
+
+// Poll for results
+const status = await client.callTool({
+  name: "get_task_status",
+  arguments: { taskId: "task-xxx" }
+});
+// → { status: "completed", annotations: [...] }`}</Code>
+        </GuideSection>
+
+        <GuideSection title="Full Flow (A2A + Free Quota)">
+          <ol style={{ paddingLeft: 20, fontSize: 13, lineHeight: 2 }}>
+            <li><strong>A2A Consultation</strong> — Chat with the agent to learn about capabilities and pricing</li>
+            <li><strong>Get Invite Code</strong> — Request an invite code during consultation</li>
+            <li><strong>Register Codatta DID</strong> — Free on-chain identity registration</li>
+            <li><strong>Claim Invite</strong> — Call <code>claim_invite</code> MCP tool to get 10 free credits</li>
+            <li><strong>Annotate</strong> — Call <code>annotate</code> with your DID to use free quota</li>
+            <li><strong>Feedback</strong> — Submit reputation score to ERC-8004</li>
+          </ol>
+        </GuideSection>
+
+        <GuideSection title="Run the Demo">
+          <Code>{`# Terminal 1: Start the annotation provider
+cd agent && npm run start:provider
+
+# Terminal 2: Run the interactive client
+npm run start:client
+# → walks through A2A consultation, DID registration, and MCP annotation`}</Code>
+        </GuideSection>
+      </div>
+    </div>
+  )
+}
+
+function GuideSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }}>
+      <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>{title}</h4>
+      <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{children}</div>
+    </div>
+  )
+}
+
+function Code({ children }: { children: string }) {
+  return (
+    <pre style={{
+      background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6,
+      fontSize: 12, lineHeight: 1.5, overflow: 'auto', margin: '8px 0',
+    }}>{children}</pre>
   )
 }
 
