@@ -105,7 +105,7 @@ export function ServiceDetail() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #e5e7eb', marginBottom: 20 }}>
         <TabButton label="Providers" active={activeTab === 'providers'} onClick={() => setSearchParams({ tab: 'providers' })} />
-        <TabButton label="Integration Guide" active={activeTab === 'guide'} onClick={() => setSearchParams({ tab: 'guide' })} />
+        <TabButton label="Get Started" active={activeTab === 'guide'} onClick={() => setSearchParams({ tab: 'guide' })} />
       </div>
 
       {/* Providers Tab */}
