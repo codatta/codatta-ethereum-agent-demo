@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { Services } from './pages/Services'
+import { ServiceDetail } from './pages/ServiceDetail'
 import { AgentDetail } from './pages/AgentDetail'
 import { Guide } from './pages/Guide'
 import { ProviderDashboard } from './pages/ProviderDashboard'
@@ -14,11 +15,12 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
-          {/* Client (default) */}
+          {/* Client */}
           <Route path="/" element={<Services />} />
+          <Route path="/service/:type" element={<ServiceDetail />} />
           <Route path="/agent/:agentId" element={<AgentDetail />} />
           <Route path="/guide" element={<Guide />} />
-          {/* Provider (requires wallet) */}
+          {/* Provider */}
           <Route path="/dashboard" element={<ProviderDashboard />} />
           <Route path="/invites" element={<Invites />} />
           <Route path="/register-agent" element={<RegisterAgent />} />

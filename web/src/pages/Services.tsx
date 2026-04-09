@@ -1,94 +1,123 @@
 import { Link } from 'react-router-dom'
 import { useAgentList } from '../hooks/useAgentList'
 
-export function Services() {
-  const { agents, loading, error } = useAgentList()
+const SERVICE_CATALOG = [
+  {
+    type: 'annotation',
+    name: 'Data Annotation',
+    description: 'Image labeling, object detection, semantic segmentation, and text classification. Powered by AI agents and human annotators through the Codatta data production system.',
+    taskTypes: ['Object Detection', 'Segmentation', 'Classification', 'NER'],
+    protocol: 'MCP annotate tool',
+    status: 'available' as const,
+  },
+  {
+    type: 'validation',
+    name: 'Data Validation',
+    description: 'Quality assurance for annotated datasets. Cross-validation, accuracy scoring, and consistency checks.',
+    taskTypes: ['Annotation QA', 'Data Integrity', 'Format Validation'],
+    protocol: 'MCP validate tool',
+    status: 'coming-soon' as const,
+  },
+  {
+    type: 'data-access',
+    name: 'Data Access',
+    description: 'Query and access curated datasets from the Codatta open data platform. On-chain data provenance and fingerprint verification.',
+    taskTypes: ['Dataset Query', 'Data Download', 'Provenance Check'],
+    protocol: 'MCP / x402',
+    status: 'coming-soon' as const,
+  },
+]
 
-  if (loading) return <p>Loading services...</p>
-  if (error) return <p style={{ color: 'red' }}>Error: {error}</p>
+export function Services() {
+  const { agents } = useAgentList()
+
+  // Count agents per service type (by keyword matching in description)
+  function countAgents(type: string): number {
+    if (type === 'annotation') {
+      return agents.filter(a => {
+        const desc = (a.description || '').toLowerCase()
+        return desc.includes('annotation') || desc.includes('label') || desc.includes('detection')
+      }).length
+    }
+    return 0
+  }
 
   return (
     <div>
-      <h2>Data Annotation Services</h2>
-      <p style={{ color: '#666', marginBottom: 20 }}>
-        Browse available annotation agents. Each agent provides MCP tools for image labeling, segmentation, and classification.
+      <h2>Codatta Data Services</h2>
+      <p style={{ color: '#666', marginBottom: 24 }}>
+        AI-powered data services built on the Codatta data production ecosystem.
+        Browse services, discover agents, and integrate via MCP protocol.
       </p>
 
-      {agents.length === 0 ? (
-        <div style={{ padding: 24, background: '#fafafa', borderRadius: 8, textAlign: 'center' }}>
-          <p style={{ color: '#999', margin: 0 }}>No agents registered yet.</p>
-          <p style={{ color: '#999', fontSize: 13 }}>
-            Run <code>npm run start:provider</code> in the agent directory to register one.
-          </p>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gap: 16 }}>
-          {agents.map((agent) => {
-            const reg = agent.registrationFile
-            const services = reg?.services || []
-            const hasMCP = services.some(s => s.name === 'MCP')
-            const hasA2A = services.some(s => s.name === 'A2A')
-            const hasDID = services.some(s => s.name === 'DID')
+      <div style={{ display: 'grid', gap: 16 }}>
+        {SERVICE_CATALOG.map((svc) => {
+          const agentCount = countAgents(svc.type)
+          const isAvailable = svc.status === 'available'
 
-            return (
-              <Link
-                key={agent.agentId.toString()}
-                to={`/agent/${agent.agentId.toString()}`}
-                style={{ textDecoration: 'none', color: 'inherit' }}
-              >
-                <div style={cardStyle}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                    <div style={{ flex: 1 }}>
-                      <h3 style={{ margin: '0 0 6px 0' }}>{agent.name}</h3>
-                      <p style={{ margin: 0, fontSize: 13, color: '#666', lineHeight: 1.5 }}>
-                        {agent.description.slice(0, 150)}{agent.description.length > 150 ? '...' : ''}
-                      </p>
-                    </div>
-                    {reg?.active && (
-                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 12, fontSize: 12, flexShrink: 0, marginLeft: 12 }}>
-                        Active
-                      </span>
-                    )}
-                  </div>
+          return (
+            <div key={svc.type} style={{
+              ...cardStyle,
+              opacity: isAvailable ? 1 : 0.6,
+              cursor: isAvailable ? 'pointer' : 'default',
+            }}>
+              {isAvailable ? (
+                <Link to={`/service/${svc.type}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                  <CardContent svc={svc} agentCount={agentCount} />
+                </Link>
+              ) : (
+                <CardContent svc={svc} agentCount={agentCount} />
+              )}
+            </div>
+          )
+        })}
+      </div>
 
-                  {/* Protocols & Features */}
-                  <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-                    {hasMCP && <Tag color="#7c3aed">MCP</Tag>}
-                    {hasA2A && <Tag color="#0891b2">A2A</Tag>}
-                    {hasDID && <Tag color="#059669">DID</Tag>}
-                    {reg?.x402Support && <Tag color="#d97706">x402</Tag>}
-                    {reg?.supportedTrust?.map(t => <Tag key={t} color="#6b7280">{t}</Tag>)}
-                  </div>
-
-                  {/* Owner */}
-                  <div style={{ marginTop: 10, fontSize: 12, color: '#999', fontFamily: 'monospace' }}>
-                    Owner: {agent.owner.slice(0, 10)}...{agent.owner.slice(-4)}
-                  </div>
-                </div>
-              </Link>
-            )
-          })}
-        </div>
-      )}
-
-      <div style={{ marginTop: 24, padding: 16, background: '#f5f3ff', borderRadius: 8 }}>
+      <div style={{ marginTop: 32, padding: 16, background: '#f5f3ff', borderRadius: 8 }}>
         <p style={{ margin: 0, fontSize: 13 }}>
-          <strong>New to Codatta?</strong> Check the <Link to="/guide">Guide</Link> to learn how to use these services via MCP and A2A.
+          <strong>Want to provide data services?</strong> Connect your wallet and{' '}
+          <Link to="/register-agent">register as a Provider</Link>.
         </p>
       </div>
     </div>
   )
 }
 
-function Tag({ color, children }: { color: string; children: React.ReactNode }) {
+function CardContent({ svc, agentCount }: { svc: typeof SERVICE_CATALOG[0]; agentCount: number }) {
+  const isAvailable = svc.status === 'available'
+
   return (
-    <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, color, background: `${color}15`, border: `1px solid ${color}30` }}>
-      {children}
-    </span>
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+        <div style={{ flex: 1 }}>
+          <h3 style={{ margin: '0 0 6px' }}>{svc.name}</h3>
+          <p style={{ margin: 0, fontSize: 13, color: '#666', lineHeight: 1.5 }}>{svc.description}</p>
+        </div>
+        <span style={{
+          padding: '2px 10px', borderRadius: 12, fontSize: 12, flexShrink: 0, marginLeft: 12,
+          background: isAvailable ? '#dcfce7' : '#f3f4f6',
+          color: isAvailable ? '#166534' : '#9ca3af',
+        }}>
+          {isAvailable ? 'Available' : 'Coming Soon'}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+        {svc.taskTypes.map(t => (
+          <span key={t} style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: '#f3f4f6', color: '#6b7280' }}>
+            {t}
+          </span>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 20, marginTop: 12, fontSize: 12, color: '#999' }}>
+        <span>Protocol: <strong style={{ color: '#374151' }}>{svc.protocol}</strong></span>
+        {isAvailable && <span>Providers: <strong style={{ color: '#374151' }}>{agentCount}</strong></span>}
+      </div>
+    </>
   )
 }
 
 const cardStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb', borderRadius: 8, padding: 16,
-  background: 'white', cursor: 'pointer', transition: 'box-shadow 0.2s',
+  border: '1px solid #e5e7eb', borderRadius: 8, padding: 20, background: 'white',
 }
