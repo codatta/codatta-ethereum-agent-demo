@@ -27,6 +27,8 @@ export function Layout() {
               <NavLink to="/register-agent" current={pathname} label="Register" />
             </>
           )}
+          <div style={{ flex: 1 }} />
+          <NavLink to="/status" current={pathname} label="Status" />
         </nav>
       </header>
 
@@ -34,9 +36,8 @@ export function Layout() {
         <Outlet />
       </div>
 
-      <footer style={{ marginTop: 40, paddingTop: 16, borderTop: '1px solid #f0f0f0', fontSize: 12, color: '#999', display: 'flex', justifyContent: 'space-between' }}>
-        <span>Codatta Demo — Codatta DID × ERC-8004 × MCP</span>
-        <Link to="/status" style={{ color: '#999', textDecoration: 'none' }}>System Status</Link>
+      <footer style={{ marginTop: 40, paddingTop: 16, borderTop: '1px solid #f0f0f0', fontSize: 12, color: '#999' }}>
+        Codatta Demo — Codatta DID × ERC-8004 × MCP
       </footer>
     </div>
   )
