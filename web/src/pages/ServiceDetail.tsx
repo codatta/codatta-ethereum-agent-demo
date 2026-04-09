@@ -8,7 +8,8 @@ import { addresses, reputationRegistryAbi } from '../config/contracts'
 const SERVICE_INFO: Record<string, { name: string; description: string }> = {
   annotation: {
     name: 'Data Annotation',
-    description: 'Browse annotation service providers. Agents are ranked by reputation score.',
+    description: 'Image labeling, object detection, semantic segmentation, and text classification.',
+    providersHint: 'Providers are ranked by reputation score.',
   },
 }
 
@@ -110,6 +111,7 @@ export function ServiceDetail() {
       {/* Providers Tab */}
       {activeTab === 'providers' && (
         <>
+          <p style={{ color: '#999', fontSize: 13, marginBottom: 16 }}>{info.providersHint}</p>
           {loading ? (
             <p>Loading providers...</p>
           ) : rankedAgents.length === 0 ? (
