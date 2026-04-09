@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAgentList } from '../hooks/useAgentList'
 import { usePublicClient } from 'wagmi'
 import { useEffect, useState } from 'react'
@@ -92,71 +92,94 @@ export function ServiceDetail() {
     )
   }
 
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'providers'
+
   return (
     <div>
       <Link to="/" style={{ fontSize: 13, color: '#666' }}>&larr; Back to Services</Link>
       <h2>{info.name}</h2>
-      <p style={{ color: '#666', marginBottom: 20 }}>{info.description}</p>
+      <p style={{ color: '#666', marginBottom: 16 }}>{info.description}</p>
 
-      {loading ? (
-        <p>Loading providers...</p>
-      ) : rankedAgents.length === 0 ? (
-        <div style={{ padding: 24, background: '#fafafa', borderRadius: 8, textAlign: 'center' }}>
-          <p style={{ color: '#999' }}>No providers available for this service.</p>
-          <p style={{ color: '#999', fontSize: 13 }}>Run <code>npm run start:provider</code> to register one.</p>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gap: 12 }}>
-          {rankedAgents.map((agent, rank) => {
-            const hasMCP = agent.services.some(s => s.name === 'MCP')
-            const hasA2A = agent.services.some(s => s.name === 'A2A')
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #e5e7eb', marginBottom: 20 }}>
+        <TabButton label="Providers" active={activeTab === 'providers'} onClick={() => setSearchParams({ tab: 'providers' })} />
+        <TabButton label="Integration Guide" active={activeTab === 'guide'} onClick={() => setSearchParams({ tab: 'guide' })} />
+      </div>
 
-            return (
-              <Link
-                key={agent.agentId.toString()}
-                to={`/agent/${agent.agentId.toString()}`}
-                style={{ textDecoration: 'none', color: 'inherit' }}
-              >
-                <div style={cardStyle}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    {/* Rank */}
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: rank === 0 ? '#fef3c7' : '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 'bold', color: rank === 0 ? '#92400e' : '#6b7280', flexShrink: 0 }}>
-                      {rank + 1}
-                    </div>
+      {/* Providers Tab */}
+      {activeTab === 'providers' && (
+        <>
+          {loading ? (
+            <p>Loading providers...</p>
+          ) : rankedAgents.length === 0 ? (
+            <div style={{ padding: 24, background: '#fafafa', borderRadius: 8, textAlign: 'center' }}>
+              <p style={{ color: '#999' }}>No providers available for this service.</p>
+              <p style={{ color: '#999', fontSize: 13 }}>Run <code>npm run start:provider</code> to register one.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 12 }}>
+              {rankedAgents.map((agent, rank) => {
+                const hasMCP = agent.services.some(s => s.name === 'MCP')
+                const hasA2A = agent.services.some(s => s.name === 'A2A')
 
-                    {/* Info */}
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <strong>{agent.name}</strong>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          {hasMCP && <Tag>MCP</Tag>}
-                          {hasA2A && <Tag>A2A</Tag>}
-                          {agent.x402Support && <Tag>x402</Tag>}
+                return (
+                  <Link
+                    key={agent.agentId.toString()}
+                    to={`/agent/${agent.agentId.toString()}`}
+                    style={{ textDecoration: 'none', color: 'inherit' }}
+                  >
+                    <div style={cardStyle}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: '50%', background: rank === 0 ? '#fef3c7' : '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 'bold', color: rank === 0 ? '#92400e' : '#6b7280', flexShrink: 0 }}>
+                          {rank + 1}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <strong>{agent.name}</strong>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              {hasMCP && <Tag>MCP</Tag>}
+                              {hasA2A && <Tag>A2A</Tag>}
+                              {agent.x402Support && <Tag>x402</Tag>}
+                            </div>
+                          </div>
+                          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#666' }}>
+                            {agent.description.slice(0, 100)}{agent.description.length > 100 ? '...' : ''}
+                          </p>
+                        </div>
+                        <div style={{ textAlign: 'center', flexShrink: 0 }}>
+                          <div style={{ fontSize: 24, fontWeight: 'bold', color: agent.reputationScore >= 80 ? '#16a34a' : agent.reputationScore >= 50 ? '#ca8a04' : '#9ca3af' }}>
+                            {agent.reputationScore || '—'}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#999' }}>Reputation</div>
                         </div>
                       </div>
-                      <p style={{ margin: '4px 0 0', fontSize: 13, color: '#666' }}>
-                        {agent.description.slice(0, 100)}{agent.description.length > 100 ? '...' : ''}
-                      </p>
                     </div>
-
-                    {/* Score */}
-                    <div style={{ textAlign: 'center', flexShrink: 0 }}>
-                      <div style={{ fontSize: 24, fontWeight: 'bold', color: agent.reputationScore >= 80 ? '#16a34a' : agent.reputationScore >= 50 ? '#ca8a04' : '#9ca3af' }}>
-                        {agent.reputationScore || '—'}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#999' }}>Reputation</div>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            )
-          })}
-        </div>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
 
-      {/* Integration Guide (service-specific) */}
-      {type === 'annotation' && <AnnotationGuide />}
+      {/* Guide Tab */}
+      {activeTab === 'guide' && type === 'annotation' && <AnnotationGuide />}
     </div>
+  )
+}
+
+function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer',
+      fontSize: 14, fontWeight: active ? 600 : 400,
+      color: active ? '#4f46e5' : '#6b7280',
+      borderBottom: active ? '2px solid #4f46e5' : '2px solid transparent',
+      marginBottom: -2,
+    }}>
+      {label}
+    </button>
   )
 }
 
