@@ -389,6 +389,16 @@ async function main() {
       },
       async ({ inviteCode, clientDid }) => {
         log.event("MCP tool call", `claim_invite: did=${clientDid}`);
+
+        // Check: invite code must exist and not already claimed
+        const record = inviteRecords.find(r => r.inviteCode === inviteCode);
+        if (!record) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ status: "error", message: "Invalid invite code." }) }] };
+        }
+        if (record.claimedAt) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ status: "error", message: "Invite code already claimed." }) }] };
+        }
+
         grantFreeQuota(clientDid, inviteCode);
         const remaining = freeQuotaStore.get(clientDid) || 0;
         return {
