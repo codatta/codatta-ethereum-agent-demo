@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { usePublicClient, useAccount } from 'wagmi'
 import { addresses } from '../config/contracts'
 import { anvilLocal } from '../config/wagmi'
@@ -118,6 +119,28 @@ export function Status() {
               : 'Some contracts are not deployed. Run: forge script script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast'}
           </p>
         )}
+      </div>
+
+      {/* Quick Navigation */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+        <Link to="/services" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ padding: 20, border: '1px solid #e5e7eb', borderRadius: 8, cursor: 'pointer', background: '#fafafa' }}>
+            <div style={{ fontSize: 24, marginBottom: 8 }}>🔍</div>
+            <h3 style={{ margin: '0 0 4px' }}>I'm a Client</h3>
+            <p style={{ margin: 0, fontSize: 13, color: '#666' }}>
+              Browse data annotation services, compare agents, learn how to use MCP/A2A
+            </p>
+          </div>
+        </Link>
+        <Link to="/dashboard" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ padding: 20, border: '1px solid #e5e7eb', borderRadius: 8, cursor: 'pointer', background: '#fafafa' }}>
+            <div style={{ fontSize: 24, marginBottom: 8 }}>⚙️</div>
+            <h3 style={{ margin: '0 0 4px' }}>I'm a Provider</h3>
+            <p style={{ margin: 0, fontSize: 13, color: '#666' }}>
+              Manage your agents, view service records, track invites and reputation
+            </p>
+          </div>
+        </Link>
       </div>
 
       {/* Chain */}
