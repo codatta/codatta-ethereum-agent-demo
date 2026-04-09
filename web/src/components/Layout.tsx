@@ -35,7 +35,7 @@ export function Layout() {
       </div>
 
       <footer style={{ marginTop: 40, paddingTop: 16, borderTop: '1px solid #f0f0f0', fontSize: 12, color: '#999' }}>
-        Codatta Demo — Codatta DID × ERC-8004 × MCP
+        Codatta — AI-Powered Data Services
       </footer>
     </div>
   )

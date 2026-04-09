@@ -117,7 +117,7 @@ export function ServiceDetail() {
           ) : rankedAgents.length === 0 ? (
             <div style={{ padding: 24, background: '#fafafa', borderRadius: 8, textAlign: 'center' }}>
               <p style={{ color: '#999' }}>No providers available for this service.</p>
-              <p style={{ color: '#999', fontSize: 13 }}>Run <code>npm run start:provider</code> to register one.</p>
+              <p style={{ color: '#999', fontSize: 13 }}>No providers have registered for this service yet.</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: 12 }}>
@@ -240,14 +240,6 @@ const status = await client.callTool({
           </ol>
         </GuideSection>
 
-        <GuideSection title="Run the Demo">
-          <Code>{`# Terminal 1: Start the annotation provider
-cd agent && npm run start:provider
-
-# Terminal 2: Run the interactive client
-npm run start:client
-# → walks through A2A consultation, DID registration, and MCP annotation`}</Code>
-        </GuideSection>
       </div>
     </div>
   )
