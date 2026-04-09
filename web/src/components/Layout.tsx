@@ -20,9 +20,9 @@ export function Layout() {
             <>
               <Sep />
               <span style={groupLabel}>Provider</span>
-              <NavLink to="/dashboard" current={pathname} label="Dashboard" />
+              <NavLink to="/dashboard" current={pathname} label="My Agents" />
               <NavLink to="/invites" current={pathname} label="Invites" />
-              <NavLink to="/register-agent" current={pathname} label="Register" />
+              <NavLink to="/register-agent" current={pathname} label="+ New Agent" />
             </>
           )}
           <div style={{ flex: 1 }} />
