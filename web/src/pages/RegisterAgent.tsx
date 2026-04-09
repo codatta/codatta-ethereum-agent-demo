@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useAccount, useWriteContract, usePublicClient } from 'wagmi'
+import { useAccount, useConnect, useWriteContract, usePublicClient } from 'wagmi'
+import { injected } from 'wagmi/connectors'
 import { parseAbi, decodeEventLog, encodeAbiParameters, toHex } from 'viem'
 import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
 import { Link } from 'react-router-dom'
@@ -21,6 +22,7 @@ const STEPS = [
 
 export function RegisterAgent() {
   const { isConnected } = useAccount()
+  const { connect } = useConnect()
   const client = usePublicClient()
   const { writeContractAsync } = useWriteContract()
 
@@ -131,7 +133,13 @@ export function RegisterAgent() {
     return (
       <div>
         <h2>Register Agent</h2>
-        <p style={{ color: '#ca8a04' }}>Please connect your wallet first.</p>
+        <p style={{ color: '#666', marginBottom: 16 }}>Connect your wallet to register as a data service provider.</p>
+        <button
+          onClick={() => connect({ connector: injected() })}
+          style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#4f46e5', color: 'white', fontSize: 14, cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          Connect Wallet
+        </button>
       </div>
     )
   }
