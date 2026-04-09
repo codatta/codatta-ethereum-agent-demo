@@ -190,6 +190,57 @@ export function ProviderDashboard() {
       <div style={{ marginTop: 24 }}>
         <Link to="/register-agent" style={{ color: '#4f46e5', fontSize: 14 }}>+ Register another Agent</Link>
       </div>
+
+      {/* Get Started Guide */}
+      <div style={{ marginTop: 32 }}>
+        <h3>Get Started as a Provider</h3>
+        <p style={{ color: '#666', fontSize: 13, marginBottom: 16 }}>
+          Follow these steps to register your Agent and start providing data services on the Codatta platform.
+        </p>
+
+        <div style={{ display: 'grid', gap: 12 }}>
+          <StepCard num={1} title="Register Your Agent" done={agents.length > 0}>
+            <p>Create a Codatta DID and register your Agent on ERC-8004. This establishes your on-chain identity, reputation history, and service endpoints.</p>
+            {agents.length === 0 && <Link to="/register-agent" style={{ color: '#4f46e5', fontSize: 13 }}>Register now →</Link>}
+          </StepCard>
+
+          <StepCard num={2} title="Implement MCP Service">
+            <p>Expose your annotation capabilities as MCP tools. Clients discover your tools via <code>tools/list</code> and invoke them via <code>tools/call</code>.</p>
+            <p><strong>Required tools:</strong></p>
+            <ul style={{ margin: '4px 0', paddingLeft: 20 }}>
+              <li><code>annotate</code> — submit images for annotation (async, returns taskId)</li>
+              <li><code>get_task_status</code> — poll for task completion</li>
+              <li><code>claim_invite</code> — claim invite codes for free quota</li>
+            </ul>
+          </StepCard>
+
+          <StepCard num={3} title="Enable A2A Consultation (Optional)">
+            <p>Add an A2A endpoint so clients can chat with your Agent before committing. Useful for explaining capabilities, negotiating pricing, and issuing invite codes.</p>
+          </StepCard>
+
+          <StepCard num={4} title="Start Serving">
+            <p>Once registered, your Agent appears in the service marketplace. Clients can discover you, check your reputation, and call your MCP tools. Deliver quality results to build your reputation score.</p>
+          </StepCard>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StepCard({ num, title, done, children }: { num: number; title: string; done?: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 16, background: done ? '#f0fdf4' : 'white' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <div style={{
+          width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 13, fontWeight: 'bold', flexShrink: 0,
+          background: done ? '#16a34a' : '#4f46e5', color: 'white',
+        }}>
+          {done ? '✓' : num}
+        </div>
+        <strong style={{ fontSize: 14 }}>{title}</strong>
+      </div>
+      <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, paddingLeft: 36 }}>{children}</div>
     </div>
   )
 }
