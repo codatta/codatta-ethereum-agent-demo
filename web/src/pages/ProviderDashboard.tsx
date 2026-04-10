@@ -147,8 +147,10 @@ export function ProviderDashboard() {
 
       {filteredAgents.length === 0 ? (
         <div style={{ ...styles.card, textAlign: 'center' }}>
-          <p style={{ color: THEME.textMuted }}>No agents in this category.</p>
-          {!showHidden && agents.length === 0 && (
+          <p style={{ color: THEME.textMuted }}>
+            {filter === 'hidden' ? 'No hidden agents.' : filter === 'visible' ? 'No visible agents.' : 'No agents registered.'}
+          </p>
+          {agents.length === 0 && (
             <Link to="/register-agent" style={{ color: THEME.accentBlue }}>Register your first Agent</Link>
           )}
         </div>

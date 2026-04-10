@@ -109,6 +109,7 @@ export function ServiceDetail() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 0, borderBottom: `2px solid ${THEME.canvas}`, marginBottom: 20 }}>
         <TabButton label="Providers" active={activeTab === 'providers'} onClick={() => setSearchParams({ tab: 'providers' })} />
+        <TabButton label="Try it" active={activeTab === 'tryit'} onClick={() => setSearchParams({ tab: 'tryit' })} />
         <TabButton label="Get Started" active={activeTab === 'guide'} onClick={() => setSearchParams({ tab: 'guide' })} />
       </div>
 
@@ -168,6 +169,10 @@ export function ServiceDetail() {
           )}
         </>
       )}
+
+      {/* Guide Tab */}
+      {/* Try it Tab */}
+      {activeTab === 'tryit' && type === 'annotation' && <AnnotationTryIt agents={rankedAgents} />}
 
       {/* Guide Tab */}
       {activeTab === 'guide' && type === 'annotation' && <AnnotationGuide />}
@@ -238,13 +243,217 @@ const status = await client.callTool({
             <li><strong>A2A Consultation</strong> — Chat with the agent to learn about capabilities and pricing</li>
             <li><strong>Get Invite Code</strong> — Request an invite code during consultation</li>
             <li><strong>Register Codatta DID</strong> — Free on-chain identity registration</li>
-            <li><strong>Claim Invite</strong> — Call <code>claim_invite</code> MCP tool to get 10 free credits</li>
-            <li><strong>Annotate</strong> — Call <code>annotate</code> with your DID to use free quota</li>
+            <li><strong>Annotate</strong> — Call <code>annotate</code> MCP tool</li>
             <li><strong>Feedback</strong> — Submit reputation score to ERC-8004</li>
           </ol>
         </GuideSection>
 
+        <GuideSection title="Download Agent Script">
+          <p>
+            For Agent-to-Agent integration, download and run the client script.
+            It walks through the complete flow: A2A consultation, DID registration, MCP annotation, and reputation feedback.
+          </p>
+          <Code>{`# Clone the repository
+git clone https://github.com/codatta/codatta-ethereum-agent-demo.git
+cd codatta-ethereum-agent-demo/agent
+
+# Install dependencies
+npm install
+
+# Configure (update .env with contract addresses)
+cp .env.example .env
+./sync-env.sh
+
+# Run the client agent
+npm run start:client`}</Code>
+        </GuideSection>
+
       </div>
+    </div>
+  )
+}
+
+function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
+  const [imageUrls, setImageUrls] = useState('https://example.com/street-001.jpg\nhttps://example.com/street-002.jpg')
+  const [task, setTask] = useState('object-detection')
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'submitting' | 'polling' | 'done' | 'error'>('idle')
+  const [result, setResult] = useState<any>(null)
+  const [errorMsg, setErrorMsg] = useState('')
+  const [logs, setLogs] = useState<string[]>([])
+
+  const topAgent = agents[0]
+  const mcpEndpoint = topAgent?.services.find(s => s.name === 'MCP')?.endpoint
+
+  function addLog(msg: string) {
+    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
+  }
+
+  async function handleRun() {
+    if (!mcpEndpoint) { setErrorMsg('No MCP endpoint available'); return }
+    setStatus('connecting')
+    setResult(null)
+    setErrorMsg('')
+    setLogs([])
+
+    const images = imageUrls.split('\n').map(u => u.trim()).filter(Boolean)
+    if (images.length === 0) { setErrorMsg('Enter at least one image URL'); setStatus('idle'); return }
+
+    try {
+      // Step 1: Initialize MCP session
+      addLog(`Connecting to MCP: ${mcpEndpoint}`)
+      const initRes = await fetch(mcpEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1, method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'codatta-web', version: '1.0.0' } },
+        }),
+      })
+      if (!initRes.ok) throw new Error(`MCP init failed: ${initRes.status}`)
+      const sessionId = initRes.headers.get('mcp-session-id')
+      addLog(`Session established: ${sessionId?.slice(0, 12)}...`)
+
+      const mcpHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (sessionId) mcpHeaders['mcp-session-id'] = sessionId
+
+      // Step 2: List tools
+      addLog('Discovering tools...')
+      const toolsRes = await fetch(mcpEndpoint, {
+        method: 'POST', headers: mcpHeaders,
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+      })
+      const toolsData = await toolsRes.json() as any
+      const tools = toolsData.result?.tools || []
+      addLog(`Found ${tools.length} tool(s): ${tools.map((t: any) => t.name).join(', ')}`)
+
+      // Step 3: Call annotate
+      setStatus('submitting')
+      addLog(`Calling annotate: ${images.length} images, task=${task}`)
+      const annotateRes = await fetch(mcpEndpoint, {
+        method: 'POST', headers: mcpHeaders,
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 3, method: 'tools/call',
+          params: { name: 'annotate', arguments: { images, task } },
+        }),
+      })
+      const annotateData = await annotateRes.json() as any
+      const textContent = annotateData.result?.content?.find((c: any) => c.type === 'text')
+      if (!textContent) throw new Error('No result from annotate')
+      const submitResult = JSON.parse(textContent.text)
+      addLog(`Task submitted: ${submitResult.taskId} (status: ${submitResult.status})`)
+
+      // Step 4: Poll get_task_status
+      setStatus('polling')
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 1000))
+        addLog(`Polling... (${i + 1}s)`)
+        const pollRes = await fetch(mcpEndpoint, {
+          method: 'POST', headers: mcpHeaders,
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 4 + i, method: 'tools/call',
+            params: { name: 'get_task_status', arguments: { taskId: submitResult.taskId } },
+          }),
+        })
+        const pollData = await pollRes.json() as any
+        const pollText = pollData.result?.content?.find((c: any) => c.type === 'text')
+        if (!pollText) continue
+        const pollResult = JSON.parse(pollText.text)
+        if (pollResult.status === 'completed') {
+          addLog(`✅ Completed in ${pollResult.duration}`)
+          setResult(pollResult)
+          setStatus('done')
+          return
+        }
+        if (pollResult.status === 'failed') throw new Error('Task failed')
+      }
+      throw new Error('Task timed out')
+    } catch (err: any) {
+      addLog(`❌ Error: ${err.message}`)
+      setErrorMsg(err.message)
+      setStatus('error')
+    }
+  }
+
+  return (
+    <div>
+      <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>
+        Try the annotation service directly from your browser. This calls the MCP endpoint of the top-ranked provider.
+      </p>
+
+      {!mcpEndpoint ? (
+        <div style={styles.card}>
+          <p style={{ color: THEME.textMuted }}>No provider available. Register one first.</p>
+        </div>
+      ) : (
+        <>
+          <div style={{ ...styles.card, marginBottom: 16 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 12, color: THEME.textMuted }}>
+              Provider: <strong style={{ color: THEME.textPrimary }}>{topAgent?.name}</strong> — MCP: <span style={styles.mono}>{mcpEndpoint}</span>
+            </p>
+          </div>
+
+          <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
+            <label>
+              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Image URLs (one per line)</span>
+              <textarea
+                value={imageUrls}
+                onChange={e => setImageUrls(e.target.value)}
+                style={{ ...styles.input, height: 80, resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
+                disabled={status !== 'idle' && status !== 'done' && status !== 'error'}
+              />
+            </label>
+            <label>
+              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Task Type</span>
+              <select value={task} onChange={e => setTask(e.target.value)} style={styles.input}>
+                <option value="object-detection">Object Detection</option>
+                <option value="segmentation">Segmentation</option>
+                <option value="classification">Classification</option>
+              </select>
+            </label>
+            <button
+              onClick={handleRun}
+              disabled={status === 'connecting' || status === 'submitting' || status === 'polling'}
+              style={{ ...styles.btnPrimary, opacity: (status !== 'idle' && status !== 'done' && status !== 'error') ? 0.6 : 1 }}
+            >
+              {status === 'idle' || status === 'done' || status === 'error' ? 'Run Annotation' :
+               status === 'connecting' ? 'Connecting...' :
+               status === 'submitting' ? 'Submitting...' : 'Polling...'}
+            </button>
+          </div>
+
+          {/* Logs */}
+          {logs.length > 0 && (
+            <div style={{ ...styles.code, marginTop: 16, maxHeight: 200, overflow: 'auto' }}>
+              {logs.map((log, i) => <div key={i}>{log}</div>)}
+            </div>
+          )}
+
+          {/* Results */}
+          {result && (
+            <div style={{ marginTop: 16 }}>
+              <h4>Annotation Results</h4>
+              {result.annotations?.map((ann: any, i: number) => (
+                <div key={i} style={{ ...styles.card, marginTop: 8 }}>
+                  <p style={{ margin: 0, ...styles.mono, color: THEME.textSecondary }}>{ann.image}</p>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                    {ann.labels?.map((label: any, j: number) => (
+                      <span key={j} style={styles.badge(THEME.accentBlue)}>
+                        {label.class} ({(label.confidence * 100).toFixed(0)}%)
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {errorMsg && (
+            <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}>
+              <p style={{ margin: 0, color: THEME.danger }}>{errorMsg}</p>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
