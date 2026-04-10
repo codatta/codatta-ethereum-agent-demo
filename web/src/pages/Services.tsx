@@ -35,15 +35,18 @@ export function Services() {
   const { hidden } = useHiddenAgents()
 
   function countAgents(type: string): number {
-    if (type === 'annotation') {
-      return agents.filter(a => {
-        if (hidden.has(a.agentId.toString())) return false
-        if (a.registrationFile?.active === false) return false
-        const desc = (a.description || '').toLowerCase()
+    return agents.filter(a => {
+      if (hidden.has(a.agentId.toString())) return false
+      if (a.registrationFile?.active === false) return false
+      const svcType = a.registrationFile?.serviceType
+      if (svcType) return svcType === type
+      // Fallback: description keyword matching for legacy agents
+      const desc = (a.description || '').toLowerCase()
+      if (type === 'annotation') {
         return desc.includes('annotation') || desc.includes('label') || desc.includes('detection')
-      }).length
-    }
-    return 0
+      }
+      return false
+    }).length
   }
 
   return (

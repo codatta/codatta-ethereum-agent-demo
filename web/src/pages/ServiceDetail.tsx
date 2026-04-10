@@ -47,6 +47,9 @@ export function ServiceDetail() {
       const matched = agents.filter(a => {
         if (hidden.has(a.agentId.toString())) return false
         if (a.registrationFile?.active === false) return false
+        // Match by serviceType field, fallback to description keywords
+        const svcType = a.registrationFile?.serviceType
+        if (svcType) return svcType === type
         const desc = (a.description || '').toLowerCase()
         if (type === 'annotation') {
           return desc.includes('annotation') || desc.includes('label') || desc.includes('detection')

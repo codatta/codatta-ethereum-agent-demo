@@ -268,11 +268,12 @@ export function RegisterAgent() {
                 const regFile = {
                   type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
                   name, description,
+                  serviceType: selectedService,
                   image: 'https://codatta.io/agents/default/avatar.png',
                   services: [
                     { name: 'DID', endpoint: `did:codatta:${didHex}`, version: 'v1' },
                   ],
-                  active: false, // Not active until URL verified
+                  active: false,
                   registrations: [],
                   supportedTrust: ['reputation'], x402Support: true,
                 }
@@ -436,6 +437,7 @@ npm run start:provider
                   const regFile = {
                     type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
                     name, description,
+                    serviceType: selectedService,
                     image: 'https://codatta.io/agents/default/avatar.png',
                     services: [
                       { name: 'MCP', endpoint: mcpUrl, version: '2025-06-18' },

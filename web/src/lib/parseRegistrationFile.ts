@@ -2,6 +2,7 @@ export interface RegistrationFile {
   type?: string
   name?: string
   description?: string
+  serviceType?: string
   image?: string
   services?: Array<{ name: string; endpoint: string; version?: string }>
   active?: boolean
