@@ -9,7 +9,6 @@ import { THEME, styles } from '../lib/theme'
 const SERVICE_TYPES = [
   { id: 'annotation', name: 'Data Annotation', description: 'Image labeling, object detection, segmentation, classification', requiredTools: ['annotate', 'get_task_status'] },
   { id: 'validation', name: 'Data Validation', description: 'Quality assurance, accuracy scoring, consistency checks', requiredTools: ['validate'] },
-  { id: 'data-access', name: 'Data Access', description: 'Dataset query, download, provenance verification', requiredTools: ['query'] },
 ]
 
 type Step = 'service' | 'did' | 'agent' | 'verify' | 'done'
