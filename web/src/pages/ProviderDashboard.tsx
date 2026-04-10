@@ -120,15 +120,8 @@ export function ProviderDashboard() {
 
   if (loading) return <p>Loading your agents...</p>
 
-  // Debug: log hidden set and agent IDs
-  console.log('[Dashboard] hidden set:', Array.from(hidden))
-  console.log('[Dashboard] agent IDs:', agents.map(a => a.agentId.toString()))
-  console.log('[Dashboard] filter:', filter)
-
   const filteredAgents = agents.filter(a => {
-    const idStr = a.agentId.toString()
-    const isHidden = hidden.has(idStr)
-    console.log(`[Dashboard] ${idStr.slice(0,12)}... isHidden=${isHidden} filter=${filter} show=${filter === 'all' || (filter === 'visible' && !isHidden) || (filter === 'hidden' && isHidden)}`)
+    const isHidden = hidden.has(a.agentId.toString())
     if (filter === 'visible') return !isHidden
     if (filter === 'hidden') return isHidden
     return true
