@@ -23,7 +23,7 @@ import { z } from "zod";
 import { startAnnotationService } from "./annotation-service.js";
 import { provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL } from "../shared/config.js";
 import {
-  DIDRegistrarABI, DIDRegistryABI,
+  DIDRegistryABI,
   IdentityRegistryABI, ValidationRegistryABI, ReputationRegistryABI,
 } from "../shared/abis.js";
 import { buildFeedbackAuth } from "../shared/feedback-auth.js";
@@ -101,7 +101,6 @@ function saveIdentity(data: Partial<SavedIdentity>) {
 
 // Late-init contracts (depend on wallet)
 let wallet: ethers.Wallet;
-let didRegistrar: ethers.Contract;
 let didRegistry: ethers.Contract;
 let identity: ethers.Contract;
 let validationReg: ethers.Contract;
@@ -188,97 +187,40 @@ async function updateValidation(agentId: bigint) {
   }
 }
 
-async function registerIdentity(
-  network: ethers.Network,
-  serviceEndpointUrl: string,
-  mcpEndpointUrl: string,
-  a2aEndpointUrl: string,
-): Promise<{ agentId: bigint; codattaDid: bigint }> {
-  // ── Register Codatta DID ──────────────────────────────────────
-  log.step("Registering Codatta DID");
-
-  const didTx = await didRegistrar.register();
-  const didReceipt = await didTx.wait();
-
-  const didEvent = didReceipt.logs
-    .map((l: ethers.Log) => {
-      try { return didRegistry.interface.parseLog({ topics: [...l.topics], data: l.data }); }
-      catch { return null; }
-    })
-    .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
-
-  const codattaDid: bigint = didEvent!.args.identifier;
-  log.info("Codatta DID:", `did:codatta:${codattaDid.toString(16)}`);
-
-  // ── Register in ERC-8004 ──────────────────────────────────────
-  log.step("Registering agent in ERC-8004");
-
-  const registrationFile = {
-    type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-    name: "Codatta Annotation Agent",
-    description:
-      "AI agent for image annotation in the Codatta data production ecosystem. " +
-      "Supports object detection labeling, semantic segmentation, and classification.",
-    image: "https://codatta.io/agents/annotation/avatar.png",
-    services: [
-      { name: "web", endpoint: serviceEndpointUrl },
-      { name: "MCP", endpoint: mcpEndpointUrl, version: "2025-06-18" },
-      { name: "A2A", endpoint: `${a2aEndpointUrl}/.well-known/agent-card.json`, version: "0.3.0" },
-      { name: "DID", endpoint: `did:codatta:${codattaDid.toString(16)}`, version: "v1" },
-    ],
-    active: true,
-    registrations: [] as { agentId: string; agentRegistry: string }[],
-    supportedTrust: ["reputation"],
-    x402Support: true,
-  };
-
-  const agentURI = `data:application/json;base64,${Buffer.from(JSON.stringify(registrationFile)).toString("base64")}`;
-  const regTx = await identity.register(agentURI);
-  const regReceipt = await regTx.wait();
-
-  const regEvent = regReceipt.logs
-    .map((l: ethers.Log) => {
-      try { return identity.interface.parseLog({ topics: [...l.topics], data: l.data }); }
-      catch { return null; }
-    })
-    .find((e: ethers.LogDescription | null) => e?.name === "Registered");
-
-  const agentId: bigint = regEvent!.args.agentId;
-  log.info("Agent ID:", agentId.toString());
-
-  registrationFile.registrations.push({
-    agentId: agentId.toString(),
-    agentRegistry: addresses.identityRegistry,
+function ask(question: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => { rl.close(); resolve(answer.trim()); });
   });
-  const updatedURI = `data:application/json;base64,${Buffer.from(JSON.stringify(registrationFile)).toString("base64")}`;
-  await (await identity.setAgentUri(agentId, updatedURI)).wait();
+}
 
-  // ── Link DID ↔ ERC-8004 ──────────────────────────────────────
-  log.step("Linking DID ↔ ERC-8004");
+async function promptIdentity(network: ethers.Network): Promise<{ agentId: bigint; codattaDid: bigint }> {
+  log.info("");
+  log.info("Enter your Agent ID and Codatta DID (from Web Dashboard registration):");
+  log.info("");
 
-  await (await identity.setMetadata(
-    agentId, "codatta:did",
-    ethers.AbiCoder.defaultAbiCoder().encode(["uint128"], [codattaDid])
-  )).wait();
+  const agentIdStr = await ask("  Agent ID: ");
+  if (!agentIdStr) throw new Error("Agent ID is required. Register via Web Dashboard first.");
 
-  const didServiceEndpoint = JSON.stringify({
-    id: `did:codatta:${codattaDid.toString(16)}#erc8004`,
-    type: "ERC8004Agent",
-    serviceEndpoint: `eip155:${network.chainId}:${addresses.identityRegistry}#${agentId}`,
-  });
-  await (await didRegistry.addItemToAttribute(
-    codattaDid, codattaDid, "service",
-    ethers.toUtf8Bytes(didServiceEndpoint)
-  )).wait();
+  const didStr = await ask("  Codatta DID (did:codatta:xxx or hex): ");
+  if (!didStr) throw new Error("Codatta DID is required. Register via Web Dashboard first.");
 
-  log.info("DID → ERC-8004:", `agentId=${agentId}`);
-  log.info("ERC-8004 → DID:", `did:codatta:${codattaDid.toString(16)}`);
-  log.success("Dual identity established");
+  const agentId = BigInt(agentIdStr);
+  const didHex = didStr.replace("did:codatta:", "");
+  const codattaDid = BigInt(`0x${didHex}`);
 
-  // Save identity for next startup
+  // Verify on-chain
+  const owner = await identity.ownerOf(agentId);
+  if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
+    throw new Error(`Agent ${agentId} is not owned by ${wallet.address}`);
+  }
+
+  log.success("Identity verified on-chain");
+
+  // Save for next startup
   saveIdentity({
     agentId: agentId.toString(),
-    codattaDid: codattaDid.toString(16),
+    codattaDid: didHex,
     chainId: Number(network.chainId),
   });
 
@@ -289,7 +231,6 @@ async function main() {
   // ── Init wallet ───────────────────────────────────────────────
   wallet = await getOrCreateWallet();
 
-  didRegistrar = new ethers.Contract(addresses.didRegistrar, DIDRegistrarABI, wallet);
   didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, wallet);
   identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, wallet);
   validationReg = new ethers.Contract(addresses.validationRegistry, ValidationRegistryABI, wallet);
@@ -303,37 +244,34 @@ async function main() {
   log.step("Starting annotation backend");
   annotationServiceUrl = await startAnnotationService();
 
-  // ── Step 1: Check saved identity or register ──────────────────
+  // ── Step 1: Load or input identity ─────────────────────────────
   const saved = loadIdentity();
   let agentId: bigint;
   let codattaDid: bigint;
 
-  const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
-  const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
-  const a2aEndpointUrl = `http://localhost:${A2A_PORT}`;
-
   if (saved?.agentId && saved?.codattaDid && saved?.chainId === Number(network.chainId)) {
-    // ── Returning provider — skip registration ──────────────────
     agentId = BigInt(saved.agentId);
     codattaDid = BigInt(`0x${saved.codattaDid}`);
 
-    // Verify still valid on-chain
+    // Verify on-chain
     try {
       const owner = await identity.ownerOf(agentId);
       if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
         throw new Error("Agent owner mismatch");
       }
-      log.step("Identity loaded from file");
+      log.step("Identity loaded");
       log.info("Agent ID:", agentId.toString());
       log.info("Codatta DID:", `did:codatta:${codattaDid.toString(16)}`);
       log.success("Identity verified on-chain");
     } catch {
-      log.info("Saved identity invalid, re-registering...");
-      ({ agentId, codattaDid } = await registerIdentity(network, serviceEndpointUrl, mcpEndpointUrl, a2aEndpointUrl));
+      log.info("Saved identity invalid on current chain. Please re-enter.");
+      ({ agentId, codattaDid } = await promptIdentity(network));
     }
   } else {
-    // ── First time — full registration ──────────────────────────
-    ({ agentId, codattaDid } = await registerIdentity(network, serviceEndpointUrl, mcpEndpointUrl, a2aEndpointUrl));
+    // First time — ask user to input
+    log.step("No saved identity found");
+    log.info("Register your Agent via the Web Dashboard first, then enter the details here.");
+    ({ agentId, codattaDid } = await promptIdentity(network));
   }
 
   // Write agent info for client/query
