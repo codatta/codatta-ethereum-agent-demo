@@ -115,11 +115,16 @@ export function ProviderDashboard() {
   }
 
   const { hidden, hideAgent, showAgent } = useHiddenAgents()
-  const [showHidden, setShowHidden] = useState(false)
+  const [filter, setFilter] = useState<'visible' | 'hidden' | 'all'>('visible')
 
   if (loading) return <p>Loading your agents...</p>
 
-  const filteredAgents = agents.filter(a => showHidden ? hidden.has(a.agentId.toString()) : !hidden.has(a.agentId.toString()))
+  const filteredAgents = agents.filter(a => {
+    const isHidden = hidden.has(a.agentId.toString())
+    if (filter === 'visible') return !isHidden
+    if (filter === 'hidden') return isHidden
+    return true
+  })
 
   return (
     <div>
@@ -135,13 +140,14 @@ export function ProviderDashboard() {
 
       {/* Filter */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <FilterButton label="Active" active={!showHidden} onClick={() => setShowHidden(false)} count={agents.filter(a => !hidden.has(a.agentId.toString())).length} />
-        <FilterButton label="Hidden" active={showHidden} onClick={() => setShowHidden(true)} count={agents.filter(a => hidden.has(a.agentId.toString())).length} />
+        <FilterButton label="Visible" active={filter === 'visible'} onClick={() => setFilter('visible')} count={agents.filter(a => !hidden.has(a.agentId.toString())).length} />
+        <FilterButton label="Hidden" active={filter === 'hidden'} onClick={() => setFilter('hidden')} count={agents.filter(a => hidden.has(a.agentId.toString())).length} />
+        <FilterButton label="All" active={filter === 'all'} onClick={() => setFilter('all')} count={agents.length} />
       </div>
 
       {filteredAgents.length === 0 ? (
         <div style={{ ...styles.card, textAlign: 'center' }}>
-          <p style={{ color: THEME.textMuted }}>{showHidden ? 'No hidden agents.' : 'No active agents.'}</p>
+          <p style={{ color: THEME.textMuted }}>No agents in this category.</p>
           {!showHidden && agents.length === 0 && (
             <Link to="/register-agent" style={{ color: THEME.accentBlue }}>Register your first Agent</Link>
           )}
