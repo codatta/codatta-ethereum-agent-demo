@@ -6,20 +6,13 @@ import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from 
 import { Link } from 'react-router-dom'
 import { THEME, styles } from '../lib/theme'
 
-const STEPS = [
-  {
-    title: 'Register Codatta DID',
-    description: 'Create an on-chain decentralized identity (DID) for your Agent. This is free and generates a unique identifier (did:codatta:xxx) that serves as your Agent\'s permanent identity in the Codatta ecosystem.',
-  },
-  {
-    title: 'Register on ERC-8004',
-    description: 'Register your Agent in the ERC-8004 Identity Registry. This creates an NFT-based agent identity with a registration file containing your Agent\'s name, description, and service endpoints. Other agents and clients can discover you through this registry.',
-  },
-  {
-    title: 'Link DID ↔ ERC-8004',
-    description: 'Establish bidirectional linkage between your Codatta DID and ERC-8004 agent identity. This writes a reference from ERC-8004 to your DID (via metadata), and from your DID to ERC-8004 (via service endpoint). Anyone can verify the two identities belong to the same Agent.',
-  },
+const SERVICE_TYPES = [
+  { id: 'annotation', name: 'Data Annotation', description: 'Image labeling, object detection, segmentation, classification', requiredTools: ['annotate', 'get_task_status'] },
+  { id: 'validation', name: 'Data Validation', description: 'Quality assurance, accuracy scoring, consistency checks', requiredTools: ['validate'] },
+  { id: 'data-access', name: 'Data Access', description: 'Dataset query, download, provenance verification', requiredTools: ['query'] },
 ]
+
+type Step = 'service' | 'did' | 'agent' | 'verify' | 'done'
 
 export function RegisterAgent() {
   const { isConnected } = useAccount()
@@ -27,218 +20,472 @@ export function RegisterAgent() {
   const client = usePublicClient()
   const { writeContractAsync } = useWriteContract()
 
-  const [name, setName] = useState('My Annotation Agent')
-  const [description, setDescription] = useState('AI agent for data annotation services.')
-  const [webEndpoint, setWebEndpoint] = useState('http://localhost:4021')
-
-  const [step, setStep] = useState(0) // 0=form, 1/2/3=in progress, 4=done
+  const [step, setStep] = useState<Step>('service')
+  const [selectedService, setSelectedService] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [mcpUrl, setMcpUrl] = useState('')
   const [didHex, setDidHex] = useState('')
   const [agentId, setAgentId] = useState('')
+  const [existingDid, setExistingDid] = useState('')
+  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'checking' | 'pass' | 'fail'>('idle')
+  const [verifyError, setVerifyError] = useState('')
+  const [txLoading, setTxLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  async function handleRegister() {
-    if (!client) return
-    setError(null)
-
-    try {
-      // Step 1: Register DID
-      setStep(1)
-      const didHash = await writeContractAsync({
-        address: addresses.didRegistrar,
-        abi: parseAbi(didRegistrarAbi as unknown as string[]),
-        functionName: 'register',
-      })
-      const didReceipt = await client.waitForTransactionReceipt({ hash: didHash })
-      const didAbi = parseAbi(didRegistryAbi as unknown as string[])
-
-      let didIdentifier = 0n
-      for (const log of didReceipt.logs) {
-        try {
-          const decoded = decodeEventLog({ abi: didAbi, data: log.data, topics: log.topics })
-          if (decoded.eventName === 'DIDRegistered') {
-            didIdentifier = (decoded.args as any).identifier as bigint
-            break
-          }
-        } catch {}
-      }
-      if (!didIdentifier) throw new Error('DID registration failed — no event emitted')
-      const hex = didIdentifier.toString(16)
-      setDidHex(hex)
-
-      // Step 2: Register Agent on ERC-8004
-      setStep(2)
-      const regFile = {
-        type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-        name, description,
-        image: 'https://codatta.io/agents/default/avatar.png',
-        services: [
-          { name: 'web', endpoint: webEndpoint },
-          { name: 'DID', endpoint: `did:codatta:${hex}`, version: 'v1' },
-        ],
-        active: true, registrations: [],
-        supportedTrust: ['reputation'], x402Support: true,
-      }
-      const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
-      const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
-
-      const regHash = await writeContractAsync({
-        address: addresses.identityRegistry,
-        abi: identAbi,
-        functionName: 'register',
-        args: [tokenUri],
-      })
-      const regReceipt = await client.waitForTransactionReceipt({ hash: regHash })
-
-      let aid = 0n
-      for (const log of regReceipt.logs) {
-        try {
-          const decoded = decodeEventLog({ abi: identAbi, data: log.data, topics: log.topics })
-          if (decoded.eventName === 'Registered') {
-            aid = (decoded.args as any).agentId as bigint
-            break
-          }
-        } catch {}
-      }
-      if (!aid) throw new Error('Agent registration failed — no event emitted')
-      setAgentId(aid.toString())
-
-      // Step 3: Link DID ↔ ERC-8004
-      setStep(3)
-      const didBytes = encodeAbiParameters([{ type: 'uint128' }], [didIdentifier])
-      await writeContractAsync({
-        address: addresses.identityRegistry,
-        abi: identAbi,
-        functionName: 'setMetadata',
-        args: [aid, 'codatta:did', didBytes],
-      })
-
-      const serviceEndpoint = JSON.stringify({
-        id: `did:codatta:${hex}#erc8004`,
-        type: 'ERC8004Agent',
-        serviceEndpoint: `eip155:31337:${addresses.identityRegistry}#${aid}`,
-      })
-      await writeContractAsync({
-        address: addresses.didRegistry,
-        abi: didAbi,
-        functionName: 'addItemToAttribute',
-        args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(serviceEndpoint))],
-      })
-
-      setStep(4)
-    } catch (err: any) {
-      setError(err.shortMessage || err.message)
-    }
-  }
 
   if (!isConnected) {
     return (
       <div>
         <h2>Register Agent</h2>
         <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>Connect your wallet to register as a data service provider.</p>
-        <button
-          onClick={() => connect({ connector: injected() })}
-          style={styles.btnPrimary}
-        >
+        <button onClick={() => connect({ connector: injected() })} style={styles.btnPrimary}>
           Connect Wallet
         </button>
       </div>
     )
   }
 
-  // Done
-  if (step === 4) {
+  // ── Step 1: Select service type ─────────────────────────────
+  if (step === 'service') {
     return (
       <div>
-        <h2>Agent Registered!</h2>
-        <div style={{ ...styles.card, background: 'rgba(34,197,94,0.06)' }}>
-          <p><strong>Agent ID:</strong> <span style={styles.mono}>{agentId}</span></p>
-          <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>did:codatta:{didHex}</Link></p>
-          <p><strong>Name:</strong> {name}</p>
-          <p style={{ margin: '12px 0 0', color: THEME.success }}>
-            All three steps completed. DID ↔ ERC-8004 bidirectional linkage established.
-          </p>
-          <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-            <Link to={`/agent/${agentId}`} style={{ ...styles.btnPrimary, textDecoration: 'none' }}>View Agent</Link>
-            <Link to={`/did/${didHex}`} style={{ ...styles.btnPrimary, textDecoration: 'none', background: THEME.accentBlue }}>View DID</Link>
-          </div>
+        <h2>Register Agent</h2>
+        <StepIndicator current="service" />
+        <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>Choose the type of service your Agent will provide.</p>
+
+        <div style={{ display: 'grid', gap: 12 }}>
+          {SERVICE_TYPES.map(svc => (
+            <div
+              key={svc.id}
+              onClick={() => {
+                setSelectedService(svc.id)
+                setName(`Codatta ${svc.name} Agent`)
+                setDescription(svc.description)
+              }}
+              style={{
+                ...styles.card,
+                cursor: 'pointer',
+                border: selectedService === svc.id ? `2px solid ${THEME.accentBlue}` : '2px solid transparent',
+              }}
+            >
+              <strong>{svc.name}</strong>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>{svc.description}</p>
+              <p style={{ margin: '6px 0 0', fontSize: 12, color: THEME.textMuted }}>
+                Required MCP tools: {svc.requiredTools.map(t => <code key={t} style={{ marginRight: 4 }}>{t}</code>)}
+              </p>
+            </div>
+          ))}
         </div>
+
+        <button
+          onClick={() => selectedService && setStep('did')}
+          disabled={!selectedService}
+          style={{ ...styles.btnPrimary, marginTop: 20, opacity: selectedService ? 1 : 0.4 }}
+        >
+          Next
+        </button>
       </div>
     )
   }
 
-  return (
-    <div>
-      <h2>Register Agent</h2>
-      <p style={{ color: THEME.textSecondary, marginBottom: 24 }}>
-        Register a new Agent with Codatta DID + ERC-8004 identity. Three on-chain transactions will be sent.
-      </p>
+  // ── Step 2: DID ─────────────────────────────────────────────
+  if (step === 'did') {
+    return (
+      <div>
+        <h2>Register Agent</h2>
+        <StepIndicator current="did" />
+        <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
+          Your Agent needs a Codatta DID. If you already have one, enter it below.
+        </p>
 
-      {/* Step progress */}
-      {step > 0 && (
-        <div style={{ marginBottom: 24 }}>
-          {STEPS.map((s, i) => {
-            const stepNum = i + 1
-            const isActive = step === stepNum
-            const isDone = step > stepNum
-            return (
-              <div key={i} style={{
-                ...styles.card,
-                marginBottom: 8,
-                padding: 14,
-                background: isDone ? 'rgba(34,197,94,0.06)' : isActive ? THEME.accentBlueLight : THEME.canvas,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>
-                    {isDone ? '✅' : isActive ? '⏳' : '⬜'}
-                  </span>
-                  <div>
-                    <strong style={{ fontSize: 14 }}>Step {stepNum}: {s.title}</strong>
-                    {isActive && (
-                      <p style={{ margin: '6px 0 0', fontSize: 13, color: THEME.textSecondary }}>{s.description}</p>
-                    )}
-                    {isDone && stepNum === 1 && didHex && (
-                      <p style={{ margin: '4px 0 0', fontSize: 12, color: THEME.success, fontFamily: 'monospace' }}>
-                        did:codatta:{didHex}
-                      </p>
-                    )}
-                    {isDone && stepNum === 2 && agentId && (
-                      <p style={{ margin: '4px 0 0', fontSize: 12, color: THEME.success, fontFamily: 'monospace' }}>
-                        agentId: {agentId.slice(0, 20)}...
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+        <div style={{ display: 'grid', gap: 16, maxWidth: 500 }}>
+          {/* Existing DID */}
+          <div style={styles.card}>
+            <strong>I already have a Codatta DID</strong>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <input
+                placeholder="did:codatta:abc123..."
+                value={existingDid}
+                onChange={e => setExistingDid(e.target.value)}
+                style={{ ...styles.input, flex: 1 }}
+              />
+              <button
+                onClick={() => {
+                  const hex = existingDid.replace('did:codatta:', '')
+                  if (hex) { setDidHex(hex); setStep('agent') }
+                }}
+                disabled={!existingDid}
+                style={{ ...styles.btnSecondary, opacity: existingDid ? 1 : 0.4 }}
+              >
+                Use this DID
+              </button>
+            </div>
+          </div>
+
+          {/* Register new */}
+          <div style={styles.card}>
+            <strong>Register a new DID</strong>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>
+              Free on-chain registration. Creates a unique identity for your Agent.
+            </p>
+            <button
+              onClick={async () => {
+                if (!client) return
+                setTxLoading(true)
+                setError(null)
+                try {
+                  const hash = await writeContractAsync({
+                    address: addresses.didRegistrar,
+                    abi: parseAbi(didRegistrarAbi as unknown as string[]),
+                    functionName: 'register',
+                  })
+                  const receipt = await client.waitForTransactionReceipt({ hash })
+                  const didAbi = parseAbi(didRegistryAbi as unknown as string[])
+                  for (const log of receipt.logs) {
+                    try {
+                      const decoded = decodeEventLog({ abi: didAbi, data: log.data, topics: log.topics })
+                      if (decoded.eventName === 'DIDRegistered') {
+                        const id = (decoded.args as any).identifier as bigint
+                        setDidHex(id.toString(16))
+                        setStep('agent')
+                        break
+                      }
+                    } catch {}
+                  }
+                } catch (err: any) {
+                  setError(err.shortMessage || err.message)
+                } finally {
+                  setTxLoading(false)
+                }
+              }}
+              disabled={txLoading}
+              style={{ ...styles.btnPrimary, marginTop: 12, opacity: txLoading ? 0.6 : 1 }}
+            >
+              {txLoading ? 'Registering...' : 'Register New DID'}
+            </button>
+          </div>
         </div>
-      )}
 
-      {/* Form */}
-      <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
-        <label>
-          <span style={{ display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4, color: THEME.textPrimary }}>Agent Name</span>
-          <input value={name} onChange={e => setName(e.target.value)} style={styles.input} disabled={step > 0} />
-        </label>
-        <label>
-          <span style={{ display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4, color: THEME.textPrimary }}>Description</span>
-          <textarea value={description} onChange={e => setDescription(e.target.value)} style={{ ...styles.input, height: 80, resize: 'vertical' }} disabled={step > 0} />
-        </label>
-        <label>
-          <span style={{ display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4, color: THEME.textPrimary }}>Web Endpoint</span>
-          <input value={webEndpoint} onChange={e => setWebEndpoint(e.target.value)} style={styles.input} disabled={step > 0} />
-        </label>
+        {error && <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}><p style={{ margin: 0, color: THEME.danger }}>{error}</p></div>}
 
-        <button onClick={handleRegister} disabled={step > 0} style={{ ...styles.btnPrimary, opacity: step > 0 ? 0.6 : 1, marginTop: 8 }}>
-          {step === 0 ? 'Register Agent (3 transactions)' : 'Processing...'}
+        <button onClick={() => setStep('service')} style={{ ...styles.btnSecondary, marginTop: 16 }}>
+          ← Back
         </button>
       </div>
+    )
+  }
 
-      {error && (
-        <div style={{ ...styles.card, marginTop: 20, background: 'rgba(239,68,68,0.04)' }}>
-          <p style={{ margin: 0, color: THEME.danger }}>{error}</p>
+  // ── Step 3: Register ERC-8004 Agent ─────────────────────────
+  if (step === 'agent') {
+    return (
+      <div>
+        <h2>Register Agent</h2>
+        <StepIndicator current="agent" />
+        <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
+          Register your Agent on ERC-8004 and link it to your DID.
+        </p>
+
+        <div style={{ ...styles.card, marginBottom: 12 }}>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            <strong>DID:</strong> <span style={styles.mono}>did:codatta:{didHex}</span>
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+            <strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}
+          </p>
         </div>
-      )}
+
+        <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
+          <label>
+            <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Agent Name</span>
+            <input value={name} onChange={e => setName(e.target.value)} style={styles.input} />
+          </label>
+          <label>
+            <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Description</span>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} style={{ ...styles.input, height: 80, resize: 'vertical' }} />
+          </label>
+
+          <button
+            onClick={async () => {
+              if (!client) return
+              setTxLoading(true)
+              setError(null)
+              try {
+                const didIdentifier = BigInt(`0x${didHex}`)
+                const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
+                const didAbi = parseAbi(didRegistryAbi as unknown as string[])
+
+                // Register on ERC-8004 (no endpoints yet — will add after verification)
+                const regFile = {
+                  type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+                  name, description,
+                  image: 'https://codatta.io/agents/default/avatar.png',
+                  services: [
+                    { name: 'DID', endpoint: `did:codatta:${didHex}`, version: 'v1' },
+                  ],
+                  active: false, // Not active until URL verified
+                  registrations: [],
+                  supportedTrust: ['reputation'], x402Support: true,
+                }
+                const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
+
+                const regHash = await writeContractAsync({
+                  address: addresses.identityRegistry, abi: identAbi,
+                  functionName: 'register', args: [tokenUri],
+                })
+                const regReceipt = await client.waitForTransactionReceipt({ hash: regHash })
+
+                let aid = 0n
+                for (const log of regReceipt.logs) {
+                  try {
+                    const decoded = decodeEventLog({ abi: identAbi, data: log.data, topics: log.topics })
+                    if (decoded.eventName === 'Registered') { aid = (decoded.args as any).agentId as bigint; break }
+                  } catch {}
+                }
+                if (!aid) throw new Error('Agent registration failed')
+                setAgentId(aid.toString())
+
+                // Link: ERC-8004 → DID
+                const didBytes = encodeAbiParameters([{ type: 'uint128' }], [didIdentifier])
+                await writeContractAsync({
+                  address: addresses.identityRegistry, abi: identAbi,
+                  functionName: 'setMetadata', args: [aid, 'codatta:did', didBytes],
+                })
+
+                // Link: DID → ERC-8004
+                const serviceEndpoint = JSON.stringify({
+                  id: `did:codatta:${didHex}#erc8004`,
+                  type: 'ERC8004Agent',
+                  serviceEndpoint: `eip155:31337:${addresses.identityRegistry}#${aid}`,
+                })
+                await writeContractAsync({
+                  address: addresses.didRegistry, abi: didAbi,
+                  functionName: 'addItemToAttribute',
+                  args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(serviceEndpoint))],
+                })
+
+                setStep('verify')
+              } catch (err: any) {
+                setError(err.shortMessage || err.message)
+              } finally {
+                setTxLoading(false)
+              }
+            }}
+            disabled={txLoading || !name}
+            style={{ ...styles.btnPrimary, opacity: txLoading || !name ? 0.5 : 1 }}
+          >
+            {txLoading ? 'Registering (3 transactions)...' : 'Register Agent'}
+          </button>
+        </div>
+
+        {error && <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}><p style={{ margin: 0, color: THEME.danger }}>{error}</p></div>}
+
+        <button onClick={() => setStep('did')} style={{ ...styles.btnSecondary, marginTop: 16 }}>← Back</button>
+      </div>
+    )
+  }
+
+  // ── Step 4: Verify MCP URL ──────────────────────────────────
+  if (step === 'verify') {
+    const svc = SERVICE_TYPES.find(s => s.id === selectedService)
+
+    return (
+      <div>
+        <h2>Register Agent</h2>
+        <StepIndicator current="verify" />
+
+        <div style={{ ...styles.card, marginBottom: 16 }}>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            <strong>Agent ID:</strong> <span style={styles.mono}>{agentId.slice(0, 20)}...</span>
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+            <strong>DID:</strong> <span style={styles.mono}>did:codatta:{didHex}</span>
+          </p>
+        </div>
+
+        <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>
+          Deploy your MCP service, then paste the URL below. We'll verify that it exposes the required tools.
+        </p>
+
+        <p style={{ fontSize: 13, color: THEME.textMuted, marginBottom: 12 }}>
+          Required tools: {svc?.requiredTools.map(t => <code key={t} style={{ marginRight: 4 }}>{t}</code>)}
+        </p>
+
+        <div style={{ display: 'flex', gap: 8, maxWidth: 500 }}>
+          <input
+            placeholder="http://localhost:4022/mcp"
+            value={mcpUrl}
+            onChange={e => { setMcpUrl(e.target.value); setVerifyStatus('idle'); setVerifyError('') }}
+            style={{ ...styles.input, flex: 1 }}
+          />
+          <button
+            onClick={async () => {
+              setVerifyStatus('checking')
+              setVerifyError('')
+              try {
+                // Try to call MCP tools/list via HTTP POST (JSON-RPC)
+                const res = await fetch(mcpUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jsonrpc: '2.0', id: 1,
+                    method: 'initialize',
+                    params: {
+                      protocolVersion: '2025-06-18',
+                      capabilities: {},
+                      clientInfo: { name: 'codatta-verifier', version: '1.0.0' },
+                    },
+                  }),
+                })
+
+                if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+                const sessionId = res.headers.get('mcp-session-id')
+
+                // Now list tools
+                const toolsRes = await fetch(mcpUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
+                  },
+                  body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+                })
+
+                const toolsData = await toolsRes.json() as any
+                const tools = toolsData.result?.tools || []
+                const toolNames = tools.map((t: any) => t.name)
+
+                const required = svc?.requiredTools || []
+                const missing = required.filter(t => !toolNames.includes(t))
+
+                if (missing.length > 0) {
+                  setVerifyStatus('fail')
+                  setVerifyError(`Missing tools: ${missing.join(', ')}. Found: ${toolNames.join(', ') || 'none'}`)
+                } else {
+                  setVerifyStatus('pass')
+                }
+              } catch (err: any) {
+                setVerifyStatus('fail')
+                setVerifyError(`Cannot connect: ${err.message}`)
+              }
+            }}
+            disabled={!mcpUrl || verifyStatus === 'checking'}
+            style={{ ...styles.btnPrimary, opacity: !mcpUrl ? 0.4 : 1, whiteSpace: 'nowrap' }}
+          >
+            {verifyStatus === 'checking' ? 'Verifying...' : 'Verify'}
+          </button>
+        </div>
+
+        {verifyStatus === 'pass' && (
+          <div style={{ ...styles.card, marginTop: 16, background: 'rgba(34,197,94,0.06)' }}>
+            <p style={{ margin: 0, color: THEME.success, fontWeight: 600 }}>✅ Verification passed!</p>
+            <p style={{ margin: '8px 0 0', fontSize: 13, color: THEME.textSecondary }}>
+              Your MCP endpoint exposes all required tools. Click below to finalize registration.
+            </p>
+            <button
+              onClick={async () => {
+                if (!client) return
+                setTxLoading(true)
+                setError(null)
+                try {
+                  const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
+                  const aid = BigInt(agentId)
+
+                  // Update registration file with MCP endpoint + set active
+                  const regFile = {
+                    type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+                    name, description,
+                    image: 'https://codatta.io/agents/default/avatar.png',
+                    services: [
+                      { name: 'MCP', endpoint: mcpUrl, version: '2025-06-18' },
+                      { name: 'DID', endpoint: `did:codatta:${didHex}`, version: 'v1' },
+                    ],
+                    active: true,
+                    registrations: [{ agentId, agentRegistry: addresses.identityRegistry }],
+                    supportedTrust: ['reputation'], x402Support: true,
+                  }
+                  const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
+                  await writeContractAsync({
+                    address: addresses.identityRegistry, abi: identAbi,
+                    functionName: 'setAgentUri', args: [aid, tokenUri],
+                  })
+
+                  setStep('done')
+                } catch (err: any) {
+                  setError(err.shortMessage || err.message)
+                } finally {
+                  setTxLoading(false)
+                }
+              }}
+              disabled={txLoading}
+              style={{ ...styles.btnPrimary, marginTop: 12, opacity: txLoading ? 0.6 : 1 }}
+            >
+              {txLoading ? 'Finalizing...' : 'Finalize Registration'}
+            </button>
+          </div>
+        )}
+
+        {verifyStatus === 'fail' && (
+          <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}>
+            <p style={{ margin: 0, color: THEME.danger, fontWeight: 600 }}>❌ Verification failed</p>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>{verifyError}</p>
+          </div>
+        )}
+
+        {error && <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}><p style={{ margin: 0, color: THEME.danger }}>{error}</p></div>}
+      </div>
+    )
+  }
+
+  // ── Done ────────────────────────────────────────────────────
+  return (
+    <div>
+      <h2>Agent Registered!</h2>
+      <div style={{ ...styles.card, background: 'rgba(34,197,94,0.06)' }}>
+        <p><strong>Agent ID:</strong> <span style={styles.mono}>{agentId}</span></p>
+        <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>did:codatta:{didHex}</Link></p>
+        <p><strong>Name:</strong> {name}</p>
+        <p><strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}</p>
+        <p><strong>MCP:</strong> <span style={styles.mono}>{mcpUrl}</span></p>
+        <p style={{ margin: '12px 0 0', color: THEME.success }}>
+          ✅ Agent is active and discoverable on ERC-8004.
+        </p>
+        <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
+          <Link to={`/agent/${agentId}`} style={{ ...styles.btnPrimary, textDecoration: 'none' }}>View Agent</Link>
+          <Link to="/dashboard" style={{ ...styles.btnSecondary, textDecoration: 'none' }}>My Agents</Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StepIndicator({ current }: { current: Step }) {
+  const steps: { key: Step; label: string }[] = [
+    { key: 'service', label: 'Service' },
+    { key: 'did', label: 'DID' },
+    { key: 'agent', label: 'Register' },
+    { key: 'verify', label: 'Verify' },
+  ]
+  const currentIdx = steps.findIndex(s => s.key === current)
+
+  return (
+    <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
+      {steps.map((s, i) => (
+        <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12, fontWeight: 600,
+            background: i < currentIdx ? THEME.success : i === currentIdx ? THEME.btnPrimary : THEME.canvas,
+            color: i <= currentIdx ? THEME.surface : THEME.textMuted,
+          }}>
+            {i < currentIdx ? '✓' : i + 1}
+          </div>
+          <span style={{ fontSize: 12, color: i === currentIdx ? THEME.textPrimary : THEME.textMuted, fontWeight: i === currentIdx ? 600 : 400 }}>
+            {s.label}
+          </span>
+          {i < steps.length - 1 && <span style={{ color: THEME.textMuted, margin: '0 4px' }}>→</span>}
+        </div>
+      ))}
     </div>
   )
 }
