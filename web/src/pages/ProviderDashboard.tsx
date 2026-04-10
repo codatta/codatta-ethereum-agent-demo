@@ -116,6 +116,7 @@ export function ProviderDashboard() {
 
   const { hidden, hideAgent, showAgent } = useHiddenAgents()
   const [filter, setFilter] = useState<'visible' | 'hidden' | 'all'>('visible')
+  const [tab, setTab] = useState<'agents' | 'guide'>('agents')
 
   if (loading) return <p>Loading your agents...</p>
 
@@ -129,14 +130,17 @@ export function ProviderDashboard() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <h2 style={{ margin: 0 }}>My Agents</h2>
-          <p style={{ color: THEME.textSecondary, margin: '4px 0 0', fontSize: 13 }}>
-            {agents.length} agent(s) registered
-          </p>
-        </div>
+        <h2 style={{ margin: 0 }}>Provider</h2>
         <Link to="/register-agent" style={{ ...styles.btnPrimary, textDecoration: 'none' }}>+ New Agent</Link>
       </div>
+
+      {/* Page tabs */}
+      <div style={{ display: 'flex', gap: 0, borderBottom: `2px solid ${THEME.canvas}`, marginBottom: 20 }}>
+        <TabBtn label="My Agents" active={tab === 'agents'} onClick={() => setTab('agents')} />
+        <TabBtn label="Get Started" active={tab === 'guide'} onClick={() => setTab('guide')} />
+      </div>
+
+      {tab === 'agents' && (<>
 
       {/* Filter */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
@@ -168,14 +172,13 @@ export function ProviderDashboard() {
                       ID: {agent.agentId.toString().slice(0, 24)}...
                     </p>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {reg?.active && (
-                      <span style={styles.badge(THEME.success)}>Active</span>
-                    )}
-                    {hidden.has(agent.agentId.toString()) && (
-                      <span style={styles.badge(THEME.danger)}>Hidden</span>
-                    )}
-                  </div>
+                  {hidden.has(agent.agentId.toString()) ? (
+                    <span style={styles.badge(THEME.danger)}>Hidden</span>
+                  ) : reg?.active ? (
+                    <span style={styles.badge(THEME.success)}>Active</span>
+                  ) : (
+                    <span style={styles.badge(THEME.textMuted)}>Inactive</span>
+                  )}
                 </div>
 
                 {/* Stats */}
@@ -230,8 +233,11 @@ export function ProviderDashboard() {
       )}
 
 
+      </>)}
+
       {/* Get Started Guide */}
-      <div style={{ marginTop: 32 }}>
+      {tab === 'guide' && (
+      <div>
         <h3>Get Started as a Provider</h3>
         <p style={{ color: THEME.textSecondary, fontSize: 13, marginBottom: 16 }}>
           Follow these steps to register your Agent and start providing data services on the Codatta platform.
@@ -289,7 +295,22 @@ npm run start:provider
 # 4. Wait for client requests`}</pre>
         </div>
       </div>
+      )}
     </div>
+  )
+}
+
+function TabBtn({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer',
+      fontSize: 14, fontWeight: active ? 600 : 400,
+      color: active ? THEME.accentBlue : THEME.textSecondary,
+      borderBottom: active ? `2px solid ${THEME.accentBlue}` : '2px solid transparent',
+      marginBottom: -2,
+    }}>
+      {label}
+    </button>
   )
 }
 
