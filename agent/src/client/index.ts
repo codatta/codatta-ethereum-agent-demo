@@ -211,13 +211,13 @@ async function main() {
       return;
     }
 
-    if (inviteData.inviteCode) {
-      log.success(`Invite code received: ${inviteData.inviteCode.slice(0, 18)}...`);
-      log.info(`Free quota: ${inviteData.freeQuota} images`);
+    if (inviteData.nonce && inviteData.signature) {
+      log.success(`Invite received: nonce=${inviteData.nonce}, inviter=${inviteData.inviter?.slice(0, 10)}...`);
+      log.info(`InviteRegistrar: ${inviteData.inviteRegistrar}`);
 
       // ── Step 3: Register Codatta DID (with user confirmation) ────
       log.step("Register Codatta DID?");
-      log.info(`Benefits: ${inviteData.freeQuota} free annotation credits`);
+      log.info("Benefits: free DID registration with on-chain invite attribution");
       log.info("Cost: Free (on-chain transaction)");
 
       const answer = await askUser("\n  Register Codatta DID and claim free quota? (y/n): ");
