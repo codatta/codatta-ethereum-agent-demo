@@ -362,7 +362,7 @@ export function RegisterAgent() {
 
         <div style={{ display: 'flex', gap: 8, maxWidth: 500 }}>
           <input
-            placeholder="http://localhost:4022/mcp"
+            placeholder="http://your-server-ip:4022/mcp"
             value={mcpUrl}
             onChange={e => { setMcpUrl(e.target.value); setVerifyStatus('idle'); setVerifyError('') }}
             style={{ ...styles.input, flex: 1 }}
@@ -372,51 +372,26 @@ export function RegisterAgent() {
               setVerifyStatus('checking')
               setVerifyError('')
               try {
-                // Try to call MCP tools/list via HTTP POST (JSON-RPC)
-                const res = await fetch(mcpUrl, {
+                // Server-side verification via Invite Service
+                const res = await fetch('http://127.0.0.1:4060/verify-mcp', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    jsonrpc: '2.0', id: 1,
-                    method: 'initialize',
-                    params: {
-                      protocolVersion: '2025-06-18',
-                      capabilities: {},
-                      clientInfo: { name: 'codatta-verifier', version: '1.0.0' },
-                    },
+                    mcpUrl,
+                    requiredTools: svc?.requiredTools || [],
                   }),
                 })
-
-                if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-                const sessionId = res.headers.get('mcp-session-id')
-
-                // Now list tools
-                const toolsRes = await fetch(mcpUrl, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
-                  },
-                  body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
-                })
-
-                const toolsData = await toolsRes.json() as any
-                const tools = toolsData.result?.tools || []
-                const toolNames = tools.map((t: any) => t.name)
-
-                const required = svc?.requiredTools || []
-                const missing = required.filter(t => !toolNames.includes(t))
-
-                if (missing.length > 0) {
-                  setVerifyStatus('fail')
-                  setVerifyError(`Missing tools: ${missing.join(', ')}. Found: ${toolNames.join(', ') || 'none'}`)
-                } else {
+                if (!res.ok) throw new Error(`Verification service unavailable`)
+                const data = await res.json() as { status: string; error?: string; tools?: string[] }
+                if (data.status === 'pass') {
                   setVerifyStatus('pass')
+                } else {
+                  setVerifyStatus('fail')
+                  setVerifyError(data.error || 'Verification failed')
                 }
               } catch (err: any) {
                 setVerifyStatus('fail')
-                setVerifyError(`Cannot connect: ${err.message}`)
+                setVerifyError(err.message)
               }
             }}
             disabled={!mcpUrl || verifyStatus === 'checking'}
@@ -425,6 +400,10 @@ export function RegisterAgent() {
             {verifyStatus === 'checking' ? 'Verifying...' : 'Verify'}
           </button>
         </div>
+
+        <p style={{ fontSize: 12, color: THEME.textMuted, marginTop: 8, maxWidth: 500 }}>
+          Use a public IP or domain. The server needs to reach your MCP endpoint to verify tools.
+        </p>
 
         {/* Demo download hint */}
         <div style={{ ...styles.card, marginTop: 12, maxWidth: 500, background: THEME.accentBlueLight }}>

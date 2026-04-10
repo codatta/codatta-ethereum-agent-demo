@@ -231,6 +231,67 @@ async function main() {
     res.json({ hidden: store.hiddenAgents });
   });
 
+  // ── MCP URL verification (server-side) ──────────────────────
+
+  app.post("/verify-mcp", async (req, res) => {
+    const { mcpUrl, requiredTools } = req.body;
+    if (!mcpUrl || !requiredTools) {
+      res.status(400).json({ error: "mcpUrl and requiredTools required" });
+      return;
+    }
+
+    log.info(`Verifying MCP: ${mcpUrl} (required: ${requiredTools.join(", ")})`);
+
+    try {
+      // Step 1: Initialize MCP session
+      const initRes = await fetch(mcpUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "codatta-verifier", version: "1.0.0" },
+          },
+        }),
+      });
+
+      if (!initRes.ok) {
+        res.json({ status: "fail", error: `MCP init failed: HTTP ${initRes.status}` });
+        return;
+      }
+
+      const sessionId = initRes.headers.get("mcp-session-id");
+      const mcpHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (sessionId) mcpHeaders["mcp-session-id"] = sessionId;
+
+      // Step 2: List tools
+      const toolsRes = await fetch(mcpUrl, {
+        method: "POST",
+        headers: mcpHeaders,
+        body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+      });
+
+      const toolsData = await toolsRes.json() as any;
+      const tools = toolsData.result?.tools || [];
+      const toolNames = tools.map((t: any) => t.name);
+
+      const missing = (requiredTools as string[]).filter(t => !toolNames.includes(t));
+
+      if (missing.length > 0) {
+        log.info(`Verify failed: missing ${missing.join(", ")}`);
+        res.json({ status: "fail", error: `Missing tools: ${missing.join(", ")}. Found: ${toolNames.join(", ") || "none"}` });
+      } else {
+        log.info(`Verify passed: ${toolNames.join(", ")}`);
+        res.json({ status: "pass", tools: toolNames });
+      }
+    } catch (err: any) {
+      log.info(`Verify error: ${err.message}`);
+      res.json({ status: "fail", error: `Cannot connect: ${err.message}` });
+    }
+  });
+
   // ── Agent registration status ───────────────────────────────
 
   // Save/update registration progress
