@@ -453,6 +453,13 @@ async function main() {
 
   // MCP over Streamable HTTP (stateless mode — each request gets a fresh session)
   const mcpApp = express();
+  mcpApp.use((_req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    if (_req.method === "OPTIONS") { res.sendStatus(200); return; }
+    next();
+  });
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   mcpApp.post("/mcp", async (req, res) => {

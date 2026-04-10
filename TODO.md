@@ -59,6 +59,7 @@
 ## Web Dashboard
 
 - [ ] **BUG: My Agents hidden filter 不生效** — filter 逻辑正确（console log 确认），但 UI 仍显示全部 agent，疑似 React 渲染/状态同步问题
+- [ ] **Invite Service 统一管理 Agent 列表** — Provider/Client 从 Invite Service 获取 agent 信息，去掉 agent-info.json 依赖。Web 注册和 Provider 程序注册统一入口
 - [ ] **Agent 活跃检测** — Services 页面过滤长期无活动的 Agent（后续，可能需要心跳机制或链上最后活跃时间）
 - [ ] **链上数据索引** — 当前从 block 0 遍历事件，生产环境需要索引服务（The Graph 或自建 indexer）
 - [ ] **Invite Service 数据持久化** — 当前邀请和隐藏记录存内存，重启丢失，需要持久化存储
