@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAccount, usePublicClient } from 'wagmi'
 import { parseAbi, decodeEventLog, decodeAbiParameters } from 'viem'
 import { addresses, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
+import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 
 interface MyAgent {
@@ -112,6 +113,8 @@ export function ProviderDashboard() {
     )
   }
 
+  const { hidden, hideAgent, showAgent } = useHiddenAgents()
+
   if (loading) return <p>Loading your agents...</p>
 
   return (
@@ -140,9 +143,14 @@ export function ProviderDashboard() {
                       ID: {agent.agentId.toString().slice(0, 24)}...
                     </p>
                   </div>
-                  {reg?.active && (
-                    <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 12, fontSize: 12 }}>Active</span>
-                  )}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {reg?.active && (
+                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 12, fontSize: 12 }}>Active</span>
+                    )}
+                    {hidden.has(agent.agentId.toString()) && (
+                      <span style={{ background: '#fef2f2', color: '#dc2626', padding: '2px 8px', borderRadius: 12, fontSize: 12 }}>Hidden</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Stats */}
@@ -177,9 +185,18 @@ export function ProviderDashboard() {
                 )}
 
                 {/* Actions */}
-                <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+                <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
                   <Link to={`/agent/${agent.agentId.toString()}`} style={actionStyle}>View Details</Link>
                   <Link to="/invites" style={actionStyle}>View Invites</Link>
+                  {hidden.has(agent.agentId.toString()) ? (
+                    <button onClick={() => showAgent(agent.agentId.toString())} style={{ ...actionStyle, border: '1px solid #bbf7d0', color: '#166534', cursor: 'pointer', background: '#f0fdf4' }}>
+                      Show in Services
+                    </button>
+                  ) : (
+                    <button onClick={() => hideAgent(agent.agentId.toString())} style={{ ...actionStyle, border: '1px solid #fecaca', color: '#dc2626', cursor: 'pointer', background: '#fef2f2' }}>
+                      Hide from Services
+                    </button>
+                  )}
                 </div>
               </div>
             )

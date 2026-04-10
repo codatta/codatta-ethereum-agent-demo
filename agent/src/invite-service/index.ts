@@ -186,16 +186,39 @@ async function main() {
     });
   });
 
+  // ── Agent visibility management ──────────────────────────────
+
+  const hiddenAgents = new Set<string>(); // agentId strings
+
+  app.post("/agents/:agentId/hide", (req, res) => {
+    hiddenAgents.add(req.params.agentId);
+    log.info(`Agent hidden: ${req.params.agentId}`);
+    res.json({ status: "hidden", agentId: req.params.agentId });
+  });
+
+  app.post("/agents/:agentId/show", (req, res) => {
+    hiddenAgents.delete(req.params.agentId);
+    log.info(`Agent shown: ${req.params.agentId}`);
+    res.json({ status: "visible", agentId: req.params.agentId });
+  });
+
+  app.get("/agents/hidden", (_req, res) => {
+    res.json({ hidden: Array.from(hiddenAgents) });
+  });
+
   // GET /health
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "codatta-invite-service", totalInvites: inviteStore.size });
+    res.json({ status: "ok", service: "codatta-invite-service", totalInvites: inviteStore.size, hiddenAgents: hiddenAgents.size });
   });
 
   app.listen(INVITE_SERVICE_PORT, () => {
     log.success(`Invite Service running on http://127.0.0.1:${INVITE_SERVICE_PORT}`);
-    log.info("  POST /generate          — generate signed invite code");
-    log.info("  GET  /invites           — all invite records");
-    log.info("  GET  /invites/:inviter  — invites by provider");
+    log.info("  POST /generate              — generate signed invite code");
+    log.info("  GET  /invites               — all invite records");
+    log.info("  GET  /invites/:inviter      — invites by provider");
+    log.info("  POST /agents/:id/hide       — hide agent");
+    log.info("  POST /agents/:id/show       — show agent");
+    log.info("  GET  /agents/hidden         — hidden agent list");
     log.waiting("Ready");
   });
 }

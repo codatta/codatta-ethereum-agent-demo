@@ -1,5 +1,6 @@
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAgentList } from '../hooks/useAgentList'
+import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { usePublicClient } from 'wagmi'
 import { useEffect, useState } from 'react'
 import { parseAbi } from 'viem'
@@ -26,6 +27,7 @@ interface AgentWithScore {
 export function ServiceDetail() {
   const { type } = useParams()
   const { agents, loading: agentsLoading } = useAgentList()
+  const { hidden } = useHiddenAgents()
   const client = usePublicClient()
   const [rankedAgents, setRankedAgents] = useState<AgentWithScore[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,8 +42,9 @@ export function ServiceDetail() {
       setLoading(true)
       const repAbi = parseAbi(reputationRegistryAbi as unknown as string[])
 
-      // Filter agents matching this service type
+      // Filter agents matching this service type, exclude hidden
       const matched = agents.filter(a => {
+        if (hidden.has(a.agentId.toString())) return false
         const desc = (a.description || '').toLowerCase()
         if (type === 'annotation') {
           return desc.includes('annotation') || desc.includes('label') || desc.includes('detection')
