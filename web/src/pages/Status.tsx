@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { usePublicClient, useAccount } from 'wagmi'
 import { addresses } from '../config/contracts'
 import { anvilLocal } from '../config/wagmi'
+import { THEME, styles } from '../lib/theme'
 
 interface ContractStatus {
   name: string
@@ -97,7 +98,7 @@ export function Status() {
 
   if (loading) return <p>Checking environment...</p>
 
-  if (!status) return <p style={{ color: 'red' }}>Failed to check status.</p>
+  if (!status) return <p style={{ color: THEME.danger }}>Failed to check status.</p>
 
   return (
     <div>
@@ -105,14 +106,14 @@ export function Status() {
 
       {/* Overall */}
       <div style={{
-        padding: 16, borderRadius: 8, marginBottom: 24,
-        background: status.allReady ? '#f0fdf4' : '#fef2f2',
-        border: `1px solid ${status.allReady ? '#bbf7d0' : '#fecaca'}`,
+        ...styles.card,
+        marginBottom: 24,
+        background: status.allReady ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.04)',
       }}>
         <span style={{ fontSize: 20, marginRight: 8 }}>{status.allReady ? '✅' : '❌'}</span>
         <strong>{status.allReady ? 'Environment Ready' : 'Environment Not Ready'}</strong>
         {!status.allReady && (
-          <p style={{ margin: '8px 0 0', fontSize: 13, color: '#666' }}>
+          <p style={{ margin: '8px 0 0', fontSize: 13, color: THEME.textSecondary }}>
             {!status.chainConnected
               ? 'Cannot connect to chain. Is Anvil running? (anvil --block-time 1)'
               : 'Some contracts are not deployed. Run: forge script script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast'}
@@ -121,9 +122,9 @@ export function Status() {
       </div>
 
       {/* Chain */}
-      <section style={sectionStyle}>
+      <section style={styles.section}>
         <h3>Chain</h3>
-        <table style={tableStyle}>
+        <table style={styles.table}>
           <tbody>
             <Row label="Connected" value={status.chainConnected} />
             <Row label="Chain" value={status.chainName} />
@@ -135,9 +136,9 @@ export function Status() {
       </section>
 
       {/* Wallet */}
-      <section style={sectionStyle}>
+      <section style={styles.section}>
         <h3>Wallet</h3>
-        <table style={tableStyle}>
+        <table style={styles.table}>
           <tbody>
             <Row label="Connected" value={status.walletConnected} />
             <Row label="Address" value={status.walletAddress || 'Not connected'} mono />
@@ -146,27 +147,23 @@ export function Status() {
       </section>
 
       {/* Contracts */}
-      <section style={sectionStyle}>
+      <section style={styles.section}>
         <h3>Deployed Contracts</h3>
-        <table style={tableStyle}>
+        <table style={styles.table}>
           <thead>
             <tr>
-              <th style={thStyle}>Contract</th>
-              <th style={thStyle}>Address</th>
-              <th style={thStyle}>Status</th>
+              <th style={styles.th}>Contract</th>
+              <th style={styles.th}>Address</th>
+              <th style={styles.th}>Status</th>
             </tr>
           </thead>
           <tbody>
             {status.contracts.map((c) => (
               <tr key={c.name}>
-                <td style={tdStyle}>{c.name}</td>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12 }}>{c.address}</td>
-                <td style={tdStyle}>
-                  <span style={{
-                    padding: '2px 8px', borderRadius: 12, fontSize: 12,
-                    background: c.hasCode ? '#dcfce7' : '#fef2f2',
-                    color: c.hasCode ? '#166534' : '#dc2626',
-                  }}>
+                <td style={styles.td}>{c.name}</td>
+                <td style={{ ...styles.td, ...styles.mono }}>{c.address}</td>
+                <td style={styles.td}>
+                  <span style={c.hasCode ? styles.badge(THEME.success) : styles.badge(THEME.danger)}>
                     {c.hasCode ? 'Deployed' : 'Not Found'}
                   </span>
                 </td>
@@ -177,9 +174,9 @@ export function Status() {
       </section>
 
       {/* Config Source */}
-      <section style={sectionStyle}>
+      <section style={styles.section}>
         <h3>Configuration</h3>
-        <p style={{ fontSize: 13, color: '#666', margin: 0 }}>
+        <p style={{ fontSize: 13, color: THEME.textSecondary, margin: 0 }}>
           Contract addresses loaded from <code>script/deployment.json</code>
         </p>
       </section>
@@ -189,18 +186,13 @@ export function Status() {
 
 function Row({ label, value, mono }: { label: string; value: string | boolean; mono?: boolean }) {
   const display = typeof value === 'boolean'
-    ? <span style={{ color: value ? '#166534' : '#dc2626' }}>{value ? '✅ Yes' : '❌ No'}</span>
+    ? <span style={{ color: value ? THEME.success : THEME.danger }}>{value ? '✅ Yes' : '❌ No'}</span>
     : <span style={{ fontFamily: mono ? 'monospace' : 'inherit', fontSize: mono ? 12 : 14 }}>{value}</span>
 
   return (
     <tr>
-      <td style={{ ...tdStyle, fontWeight: 'bold', width: 140 }}>{label}</td>
-      <td style={tdStyle}>{display}</td>
+      <td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>{label}</td>
+      <td style={styles.td}>{display}</td>
     </tr>
   )
 }
-
-const sectionStyle: React.CSSProperties = { marginBottom: 20, border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }
-const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse' }
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #eee', fontSize: 12, color: '#999' }
-const tdStyle: React.CSSProperties = { padding: '6px 10px', borderBottom: '1px solid #f5f5f5', fontSize: 14 }

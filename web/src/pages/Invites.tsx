@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { THEME, styles } from '../lib/theme'
 
 interface InviteRecord {
   nonce: number
@@ -52,8 +53,8 @@ export function Invites() {
     return (
       <div>
         <h2>Invited Users</h2>
-        <div style={{ padding: 16, background: '#fef2f2', borderRadius: 8, border: '1px solid #fecaca' }}>
-          <p style={{ margin: 0, color: '#dc2626' }}>{error}</p>
+        <div style={{ ...styles.card, background: 'rgba(239,68,68,0.04)' }}>
+          <p style={{ margin: 0, color: THEME.danger }}>{error}</p>
         </div>
       </div>
     )
@@ -68,60 +69,58 @@ export function Invites() {
       {/* Summary */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
         <StatCard label="Total Invites" value={data.total} />
-        <StatCard label="Claimed" value={data.claimed} color="#166534" />
+        <StatCard label="Claimed" value={data.claimed} color={THEME.success} />
       </div>
 
       {/* Table */}
       {data.invites.length === 0 ? (
-        <p style={{ color: '#999' }}>
+        <p style={{ color: THEME.textMuted }}>
           No invites yet. Run the Client agent to trigger A2A consultation and generate invite codes.
         </p>
       ) : (
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={thStyle}>Nonce</th>
-              <th style={thStyle}>Inviter</th>
-              <th style={thStyle}>Client</th>
-              <th style={thStyle}>DID</th>
-              <th style={thStyle}>Status</th>
-              <th style={thStyle}>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.invites.map((inv, i) => (
-              <tr key={i}>
-                <td style={tdStyle}>{inv.nonce}</td>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12 }}>{inv.inviter.slice(0, 10)}...</td>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12 }}>{inv.clientAddress.slice(0, 10)}...</td>
-                <td style={tdStyle}>
-                  {inv.clientDid ? (
-                    <Link to={`/did/${inv.clientDid.replace('did:codatta:', '')}`} style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                      {inv.clientDid.slice(0, 24)}...
-                    </Link>
-                  ) : (
-                    <span style={{ color: '#999' }}>—</span>
-                  )}
-                </td>
-                <td style={tdStyle}>
-                  <span style={{
-                    padding: '2px 8px', borderRadius: 12, fontSize: 12,
-                    background: inv.claimed ? '#dcfce7' : '#fefce8',
-                    color: inv.claimed ? '#166534' : '#854d0e',
-                  }}>
-                    {inv.claimed ? 'Claimed' : 'Pending'}
-                  </span>
-                </td>
-                <td style={{ ...tdStyle, fontSize: 12, color: '#999' }}>
-                  {new Date(inv.createdAt).toLocaleTimeString()}
-                </td>
+        <div style={styles.section}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Nonce</th>
+                <th style={styles.th}>Inviter</th>
+                <th style={styles.th}>Client</th>
+                <th style={styles.th}>DID</th>
+                <th style={styles.th}>Status</th>
+                <th style={styles.th}>Created</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.invites.map((inv, i) => (
+                <tr key={i}>
+                  <td style={styles.td}>{inv.nonce}</td>
+                  <td style={{ ...styles.td, ...styles.mono }}>{inv.inviter.slice(0, 10)}...</td>
+                  <td style={{ ...styles.td, ...styles.mono }}>{inv.clientAddress.slice(0, 10)}...</td>
+                  <td style={styles.td}>
+                    {inv.clientDid ? (
+                      <Link to={`/did/${inv.clientDid.replace('did:codatta:', '')}`} style={{ ...styles.mono }}>
+                        {inv.clientDid.slice(0, 24)}...
+                      </Link>
+                    ) : (
+                      <span style={{ color: THEME.textMuted }}>—</span>
+                    )}
+                  </td>
+                  <td style={styles.td}>
+                    <span style={inv.claimed ? styles.badge(THEME.success) : styles.badge(THEME.accentOrange)}>
+                      {inv.claimed ? 'Claimed' : 'Pending'}
+                    </span>
+                  </td>
+                  <td style={{ ...styles.td, fontSize: 12, color: THEME.textMuted }}>
+                    {new Date(inv.createdAt).toLocaleTimeString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      <p style={{ fontSize: 12, color: '#999', marginTop: 16 }}>
+      <p style={{ fontSize: 12, color: THEME.textMuted, marginTop: 16 }}>
         Auto-refreshes every 5 seconds. Data from Invite Service at {INVITE_SERVICE_URL}/invites
       </p>
     </div>
@@ -130,13 +129,9 @@ export function Invites() {
 
 function StatCard({ label, value, color }: { label: string; value: number; color?: string }) {
   return (
-    <div style={{ padding: 16, border: '1px solid #e5e7eb', borderRadius: 8, minWidth: 120, textAlign: 'center' }}>
-      <div style={{ fontSize: 28, fontWeight: 'bold', color: color || '#111' }}>{value}</div>
-      <div style={{ fontSize: 13, color: '#999' }}>{label}</div>
+    <div style={{ ...styles.card, minWidth: 120, textAlign: 'center' }}>
+      <div style={{ fontSize: 28, fontWeight: 'bold', color: color || THEME.textPrimary }}>{value}</div>
+      <div style={{ fontSize: 13, color: THEME.textMuted }}>{label}</div>
     </div>
   )
 }
-
-const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', border: '1px solid #e5e7eb', borderRadius: 8 }
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #e5e7eb', fontSize: 12, color: '#999', background: '#fafafa' }
-const tdStyle: React.CSSProperties = { padding: '8px 10px', borderBottom: '1px solid #f5f5f5', fontSize: 14 }

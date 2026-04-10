@@ -5,6 +5,7 @@ import { parseAbi, decodeEventLog, decodeAbiParameters } from 'viem'
 import { addresses, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
 import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
+import { THEME, styles } from '../lib/theme'
 
 interface MyAgent {
   agentId: bigint
@@ -108,7 +109,7 @@ export function ProviderDashboard() {
     return (
       <div>
         <h2>Provider Dashboard</h2>
-        <p style={{ color: '#ca8a04' }}>Connect your wallet to view your agents.</p>
+        <p style={{ color: THEME.accentOrange }}>Connect your wallet to view your agents.</p>
       </div>
     )
   }
@@ -120,14 +121,14 @@ export function ProviderDashboard() {
   return (
     <div>
       <h2>Provider Dashboard</h2>
-      <p style={{ color: '#666', marginBottom: 20 }}>
-        Manage your registered agents. Wallet: <code style={{ fontSize: 12 }}>{address?.slice(0, 10)}...{address?.slice(-4)}</code>
+      <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
+        Manage your registered agents. Wallet: <code style={{ ...styles.mono, fontSize: 12 }}>{address?.slice(0, 10)}...{address?.slice(-4)}</code>
       </p>
 
       {agents.length === 0 ? (
-        <div style={{ padding: 24, background: '#fafafa', borderRadius: 8, textAlign: 'center' }}>
-          <p style={{ color: '#999' }}>No agents registered with this wallet.</p>
-          <Link to="/register-agent" style={{ color: '#4f46e5' }}>Register a new Agent</Link>
+        <div style={{ ...styles.card, textAlign: 'center' }}>
+          <p style={{ color: THEME.textMuted }}>No agents registered with this wallet.</p>
+          <Link to="/register-agent" style={{ color: THEME.accentBlue }}>Register a new Agent</Link>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 16 }}>
@@ -135,27 +136,27 @@ export function ProviderDashboard() {
             const reg = agent.registrationFile
             const services = reg?.services || []
             return (
-              <div key={agent.agentId.toString()} style={cardStyle}>
+              <div key={agent.agentId.toString()} style={styles.card}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                   <div>
                     <h3 style={{ margin: '0 0 4px' }}>{reg?.name || 'Unnamed Agent'}</h3>
-                    <p style={{ margin: 0, fontSize: 12, fontFamily: 'monospace', color: '#999' }}>
+                    <p style={{ margin: 0, ...styles.mono, fontSize: 12, color: THEME.textMuted }}>
                       ID: {agent.agentId.toString().slice(0, 24)}...
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
                     {reg?.active && (
-                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 12, fontSize: 12 }}>Active</span>
+                      <span style={styles.badge(THEME.success)}>Active</span>
                     )}
                     {hidden.has(agent.agentId.toString()) && (
-                      <span style={{ background: '#fef2f2', color: '#dc2626', padding: '2px 8px', borderRadius: 12, fontSize: 12 }}>Hidden</span>
+                      <span style={styles.badge(THEME.danger)}>Hidden</span>
                     )}
                   </div>
                 </div>
 
                 {/* Stats */}
                 <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
-                  <Stat label="Reputation" value={agent.reputationScore.toString()} color={agent.reputationScore >= 80 ? '#16a34a' : '#ca8a04'} />
+                  <Stat label="Reputation" value={agent.reputationScore.toString()} color={agent.reputationScore >= 80 ? THEME.success : THEME.accentOrange} />
                   <Stat label="Validations" value={agent.validationCount.toString()} />
                   <Stat label="Services" value={services.length.toString()} />
                 </div>
@@ -163,8 +164,8 @@ export function ProviderDashboard() {
                 {/* DID */}
                 {agent.didHex && (
                   <div style={{ marginTop: 12, fontSize: 12 }}>
-                    <span style={{ color: '#999' }}>DID: </span>
-                    <Link to={`/did/${agent.didHex}`} style={{ fontFamily: 'monospace', color: '#4f46e5' }}>
+                    <span style={{ color: THEME.textMuted }}>DID: </span>
+                    <Link to={`/did/${agent.didHex}`} style={{ fontFamily: 'monospace', color: THEME.accentBlue }}>
                       did:codatta:{agent.didHex.slice(0, 16)}...
                     </Link>
                   </div>
@@ -173,10 +174,10 @@ export function ProviderDashboard() {
                 {/* Endpoints */}
                 {services.length > 0 && (
                   <div style={{ marginTop: 12 }}>
-                    <span style={{ fontSize: 12, color: '#999' }}>Endpoints:</span>
+                    <span style={{ fontSize: 12, color: THEME.textMuted }}>Endpoints:</span>
                     <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
                       {services.map((svc, i) => (
-                        <span key={i} style={{ fontSize: 11, padding: '2px 8px', background: '#f3f4f6', borderRadius: 4, fontFamily: 'monospace' }}>
+                        <span key={i} style={{ fontSize: 11, padding: '2px 8px', background: THEME.canvas, borderRadius: THEME.radiusButton, fontFamily: 'monospace' }}>
                           {svc.name}: {svc.endpoint.length > 30 ? svc.endpoint.slice(0, 30) + '...' : svc.endpoint}
                         </span>
                       ))}
@@ -186,14 +187,14 @@ export function ProviderDashboard() {
 
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
-                  <Link to={`/agent/${agent.agentId.toString()}`} style={actionStyle}>View Details</Link>
-                  <Link to="/invites" style={actionStyle}>View Invites</Link>
+                  <Link to={`/agent/${agent.agentId.toString()}`} style={styles.btnSecondary}>View Details</Link>
+                  <Link to="/invites" style={styles.btnSecondary}>View Invites</Link>
                   {hidden.has(agent.agentId.toString()) ? (
-                    <button onClick={() => showAgent(agent.agentId.toString())} style={{ ...actionStyle, border: '1px solid #bbf7d0', color: '#166534', cursor: 'pointer', background: '#f0fdf4' }}>
+                    <button onClick={() => showAgent(agent.agentId.toString())} style={styles.btnSuccess}>
                       Show in Services
                     </button>
                   ) : (
-                    <button onClick={() => hideAgent(agent.agentId.toString())} style={{ ...actionStyle, border: '1px solid #fecaca', color: '#dc2626', cursor: 'pointer', background: '#fef2f2' }}>
+                    <button onClick={() => hideAgent(agent.agentId.toString())} style={styles.btnDanger}>
                       Hide from Services
                     </button>
                   )}
@@ -205,20 +206,20 @@ export function ProviderDashboard() {
       )}
 
       <div style={{ marginTop: 24 }}>
-        <Link to="/register-agent" style={{ color: '#4f46e5', fontSize: 14 }}>+ Register another Agent</Link>
+        <Link to="/register-agent" style={{ color: THEME.accentBlue, fontSize: 14 }}>+ Register another Agent</Link>
       </div>
 
       {/* Get Started Guide */}
       <div style={{ marginTop: 32 }}>
         <h3>Get Started as a Provider</h3>
-        <p style={{ color: '#666', fontSize: 13, marginBottom: 16 }}>
+        <p style={{ color: THEME.textSecondary, fontSize: 13, marginBottom: 16 }}>
           Follow these steps to register your Agent and start providing data services on the Codatta platform.
         </p>
 
         <div style={{ display: 'grid', gap: 12 }}>
           <StepCard num={1} title="Register Your Agent" done={agents.length > 0}>
             <p>Create a Codatta DID and register your Agent on ERC-8004. This establishes your on-chain identity, reputation history, and service endpoints.</p>
-            {agents.length === 0 && <Link to="/register-agent" style={{ color: '#4f46e5', fontSize: 13 }}>Register now →</Link>}
+            {agents.length === 0 && <Link to="/register-agent" style={{ color: THEME.accentBlue, fontSize: 13 }}>Register now →</Link>}
           </StepCard>
 
           <StepCard num={2} title="Implement MCP Service">
@@ -246,18 +247,18 @@ export function ProviderDashboard() {
 
 function StepCard({ num, title, done, children }: { num: number; title: string; done?: boolean; children: React.ReactNode }) {
   return (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 16, background: done ? '#f0fdf4' : 'white' }}>
+    <div style={{ ...styles.card, background: done ? 'rgba(34,197,94,0.06)' : THEME.surface }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
         <div style={{
           width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 13, fontWeight: 'bold', flexShrink: 0,
-          background: done ? '#16a34a' : '#4f46e5', color: 'white',
+          background: done ? THEME.success : THEME.btnPrimary, color: THEME.surface,
         }}>
           {done ? '✓' : num}
         </div>
         <strong style={{ fontSize: 14 }}>{title}</strong>
       </div>
-      <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, paddingLeft: 36 }}>{children}</div>
+      <div style={{ fontSize: 13, color: THEME.textPrimary, lineHeight: 1.6, paddingLeft: 36 }}>{children}</div>
     </div>
   )
 }
@@ -265,16 +266,8 @@ function StepCard({ num, title, done, children }: { num: number; title: string; 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div>
-      <div style={{ fontSize: 22, fontWeight: 'bold', color: color || '#111' }}>{value}</div>
-      <div style={{ fontSize: 12, color: '#999' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 'bold', color: color || THEME.textPrimary }}>{value}</div>
+      <div style={{ fontSize: 12, color: THEME.textMuted }}>{label}</div>
     </div>
   )
-}
-
-const cardStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb', borderRadius: 8, padding: 20, background: 'white',
-}
-const actionStyle: React.CSSProperties = {
-  fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid #d1d5db',
-  textDecoration: 'none', color: '#374151',
 }

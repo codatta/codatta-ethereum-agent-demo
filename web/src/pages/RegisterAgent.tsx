@@ -4,6 +4,7 @@ import { injected } from 'wagmi/connectors'
 import { parseAbi, decodeEventLog, encodeAbiParameters, toHex } from 'viem'
 import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
 import { Link } from 'react-router-dom'
+import { THEME, styles } from '../lib/theme'
 
 const STEPS = [
   {
@@ -133,10 +134,10 @@ export function RegisterAgent() {
     return (
       <div>
         <h2>Register Agent</h2>
-        <p style={{ color: '#666', marginBottom: 16 }}>Connect your wallet to register as a data service provider.</p>
+        <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>Connect your wallet to register as a data service provider.</p>
         <button
           onClick={() => connect({ connector: injected() })}
-          style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#4f46e5', color: 'white', fontSize: 14, cursor: 'pointer', fontWeight: 'bold' }}
+          style={styles.btnPrimary}
         >
           Connect Wallet
         </button>
@@ -149,16 +150,16 @@ export function RegisterAgent() {
     return (
       <div>
         <h2>Agent Registered!</h2>
-        <div style={{ padding: 20, background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0' }}>
-          <p><strong>Agent ID:</strong> <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{agentId}</span></p>
+        <div style={{ ...styles.card, background: 'rgba(34,197,94,0.06)' }}>
+          <p><strong>Agent ID:</strong> <span style={styles.mono}>{agentId}</span></p>
           <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>did:codatta:{didHex}</Link></p>
           <p><strong>Name:</strong> {name}</p>
-          <p style={{ margin: '12px 0 0', color: '#166534' }}>
-            ✅ All three steps completed. DID ↔ ERC-8004 bidirectional linkage established.
+          <p style={{ margin: '12px 0 0', color: THEME.success }}>
+            All three steps completed. DID ↔ ERC-8004 bidirectional linkage established.
           </p>
           <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-            <Link to={`/agent/${agentId}`} style={linkBtnStyle}>View Agent</Link>
-            <Link to={`/did/${didHex}`} style={{ ...linkBtnStyle, background: '#6366f1' }}>View DID</Link>
+            <Link to={`/agent/${agentId}`} style={{ ...styles.btnPrimary, textDecoration: 'none' }}>View Agent</Link>
+            <Link to={`/did/${didHex}`} style={{ ...styles.btnPrimary, textDecoration: 'none', background: THEME.accentBlue }}>View DID</Link>
           </div>
         </div>
       </div>
@@ -168,7 +169,7 @@ export function RegisterAgent() {
   return (
     <div>
       <h2>Register Agent</h2>
-      <p style={{ color: '#666', marginBottom: 24 }}>
+      <p style={{ color: THEME.textSecondary, marginBottom: 24 }}>
         Register a new Agent with Codatta DID + ERC-8004 identity. Three on-chain transactions will be sent.
       </p>
 
@@ -181,9 +182,10 @@ export function RegisterAgent() {
             const isDone = step > stepNum
             return (
               <div key={i} style={{
-                padding: 14, marginBottom: 8, borderRadius: 8,
-                border: `1px solid ${isDone ? '#bbf7d0' : isActive ? '#93c5fd' : '#e5e7eb'}`,
-                background: isDone ? '#f0fdf4' : isActive ? '#eff6ff' : '#fafafa',
+                ...styles.card,
+                marginBottom: 8,
+                padding: 14,
+                background: isDone ? 'rgba(34,197,94,0.06)' : isActive ? THEME.accentBlueLight : THEME.canvas,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 18 }}>
@@ -192,15 +194,15 @@ export function RegisterAgent() {
                   <div>
                     <strong style={{ fontSize: 14 }}>Step {stepNum}: {s.title}</strong>
                     {isActive && (
-                      <p style={{ margin: '6px 0 0', fontSize: 13, color: '#4b5563' }}>{s.description}</p>
+                      <p style={{ margin: '6px 0 0', fontSize: 13, color: THEME.textSecondary }}>{s.description}</p>
                     )}
                     {isDone && stepNum === 1 && didHex && (
-                      <p style={{ margin: '4px 0 0', fontSize: 12, color: '#166534', fontFamily: 'monospace' }}>
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: THEME.success, fontFamily: 'monospace' }}>
                         did:codatta:{didHex}
                       </p>
                     )}
                     {isDone && stepNum === 2 && agentId && (
-                      <p style={{ margin: '4px 0 0', fontSize: 12, color: '#166534', fontFamily: 'monospace' }}>
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: THEME.success, fontFamily: 'monospace' }}>
                         agentId: {agentId.slice(0, 20)}...
                       </p>
                     )}
@@ -215,40 +217,28 @@ export function RegisterAgent() {
       {/* Form */}
       <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
         <label>
-          <span style={labelStyle}>Agent Name</span>
-          <input value={name} onChange={e => setName(e.target.value)} style={inputStyle} disabled={step > 0} />
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4, color: THEME.textPrimary }}>Agent Name</span>
+          <input value={name} onChange={e => setName(e.target.value)} style={styles.input} disabled={step > 0} />
         </label>
         <label>
-          <span style={labelStyle}>Description</span>
-          <textarea value={description} onChange={e => setDescription(e.target.value)} style={{ ...inputStyle, height: 80, resize: 'vertical' }} disabled={step > 0} />
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4, color: THEME.textPrimary }}>Description</span>
+          <textarea value={description} onChange={e => setDescription(e.target.value)} style={{ ...styles.input, height: 80, resize: 'vertical' }} disabled={step > 0} />
         </label>
         <label>
-          <span style={labelStyle}>Web Endpoint</span>
-          <input value={webEndpoint} onChange={e => setWebEndpoint(e.target.value)} style={inputStyle} disabled={step > 0} />
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4, color: THEME.textPrimary }}>Web Endpoint</span>
+          <input value={webEndpoint} onChange={e => setWebEndpoint(e.target.value)} style={styles.input} disabled={step > 0} />
         </label>
 
-        <button onClick={handleRegister} disabled={step > 0} style={{ ...btnStyle, opacity: step > 0 ? 0.6 : 1 }}>
+        <button onClick={handleRegister} disabled={step > 0} style={{ ...styles.btnPrimary, opacity: step > 0 ? 0.6 : 1, marginTop: 8 }}>
           {step === 0 ? 'Register Agent (3 transactions)' : 'Processing...'}
         </button>
       </div>
 
       {error && (
-        <div style={{ marginTop: 20, padding: 16, background: '#fef2f2', borderRadius: 8, border: '1px solid #fecaca' }}>
-          <p style={{ margin: 0, color: '#dc2626' }}>{error}</p>
+        <div style={{ ...styles.card, marginTop: 20, background: 'rgba(239,68,68,0.04)' }}>
+          <p style={{ margin: 0, color: THEME.danger }}>{error}</p>
         </div>
       )}
     </div>
   )
-}
-
-const labelStyle: React.CSSProperties = { display: 'block', fontSize: 13, fontWeight: 'bold', marginBottom: 4, color: '#374151' }
-const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, boxSizing: 'border-box' }
-const btnStyle: React.CSSProperties = {
-  padding: '10px 24px', borderRadius: 8, border: 'none',
-  background: '#4f46e5', color: 'white', fontSize: 14,
-  cursor: 'pointer', fontWeight: 'bold', marginTop: 8,
-}
-const linkBtnStyle: React.CSSProperties = {
-  padding: '8px 16px', borderRadius: 6, background: '#4f46e5',
-  color: 'white', textDecoration: 'none', fontSize: 13,
 }

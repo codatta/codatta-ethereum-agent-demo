@@ -5,6 +5,7 @@ import { usePublicClient } from 'wagmi'
 import { useEffect, useState } from 'react'
 import { parseAbi } from 'viem'
 import { addresses, reputationRegistryAbi } from '../config/contracts'
+import { THEME, styles } from '../lib/theme'
 
 const SERVICE_INFO: Record<string, { name: string; description: string }> = {
   annotation: {
@@ -90,7 +91,7 @@ export function ServiceDetail() {
   if (!info) {
     return (
       <div>
-        <Link to="/" style={{ fontSize: 13, color: '#666' }}>&larr; Back to Services</Link>
+        <Link to="/" style={{ fontSize: 13, color: THEME.textSecondary }}>&larr; Back to Services</Link>
         <h2>Service not found</h2>
       </div>
     )
@@ -101,12 +102,12 @@ export function ServiceDetail() {
 
   return (
     <div>
-      <Link to="/" style={{ fontSize: 13, color: '#666' }}>&larr; Back to Services</Link>
+      <Link to="/" style={{ fontSize: 13, color: THEME.textSecondary }}>&larr; Back to Services</Link>
       <h2>{info.name}</h2>
-      <p style={{ color: '#666', marginBottom: 16 }}>{info.description}</p>
+      <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>{info.description}</p>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #e5e7eb', marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 0, borderBottom: `2px solid ${THEME.canvas}`, marginBottom: 20 }}>
         <TabButton label="Providers" active={activeTab === 'providers'} onClick={() => setSearchParams({ tab: 'providers' })} />
         <TabButton label="Get Started" active={activeTab === 'guide'} onClick={() => setSearchParams({ tab: 'guide' })} />
       </div>
@@ -114,13 +115,13 @@ export function ServiceDetail() {
       {/* Providers Tab */}
       {activeTab === 'providers' && (
         <>
-          <p style={{ color: '#999', fontSize: 13, marginBottom: 16 }}>{info.providersHint}</p>
+          <p style={{ color: THEME.textMuted, fontSize: 13, marginBottom: 16 }}>{info.providersHint}</p>
           {loading ? (
             <p>Loading providers...</p>
           ) : rankedAgents.length === 0 ? (
-            <div style={{ padding: 24, background: '#fafafa', borderRadius: 8, textAlign: 'center' }}>
-              <p style={{ color: '#999' }}>No providers available for this service.</p>
-              <p style={{ color: '#999', fontSize: 13 }}>No providers have registered for this service yet.</p>
+            <div style={{ ...styles.card, textAlign: 'center' }}>
+              <p style={{ color: THEME.textMuted }}>No providers available for this service.</p>
+              <p style={{ color: THEME.textMuted, fontSize: 13 }}>No providers have registered for this service yet.</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: 12 }}>
@@ -134,9 +135,9 @@ export function ServiceDetail() {
                     to={`/agent/${agent.agentId.toString()}`}
                     style={{ textDecoration: 'none', color: 'inherit' }}
                   >
-                    <div style={cardStyle}>
+                    <div style={styles.cardHover}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: '50%', background: rank === 0 ? '#fef3c7' : '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 'bold', color: rank === 0 ? '#92400e' : '#6b7280', flexShrink: 0 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: '50%', background: rank === 0 ? THEME.accentOrangeLight : THEME.canvas, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 'bold', color: rank === 0 ? THEME.accentOrange : THEME.textSecondary, flexShrink: 0 }}>
                           {rank + 1}
                         </div>
                         <div style={{ flex: 1 }}>
@@ -148,15 +149,15 @@ export function ServiceDetail() {
                               {agent.x402Support && <Tag>x402</Tag>}
                             </div>
                           </div>
-                          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#666' }}>
+                          <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>
                             {agent.description.slice(0, 100)}{agent.description.length > 100 ? '...' : ''}
                           </p>
                         </div>
                         <div style={{ textAlign: 'center', flexShrink: 0 }}>
-                          <div style={{ fontSize: 24, fontWeight: 'bold', color: agent.reputationScore >= 80 ? '#16a34a' : agent.reputationScore >= 50 ? '#ca8a04' : '#9ca3af' }}>
+                          <div style={{ fontSize: 24, fontWeight: 'bold', color: agent.reputationScore >= 80 ? THEME.success : agent.reputationScore >= 50 ? THEME.accentOrange : THEME.textMuted }}>
                             {agent.reputationScore || '—'}
                           </div>
-                          <div style={{ fontSize: 11, color: '#999' }}>Reputation</div>
+                          <div style={{ fontSize: 11, color: THEME.textMuted }}>Reputation</div>
                         </div>
                       </div>
                     </div>
@@ -179,8 +180,8 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
     <button onClick={onClick} style={{
       padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer',
       fontSize: 14, fontWeight: active ? 600 : 400,
-      color: active ? '#4f46e5' : '#6b7280',
-      borderBottom: active ? '2px solid #4f46e5' : '2px solid transparent',
+      color: active ? THEME.accentBlue : THEME.textSecondary,
+      borderBottom: active ? `2px solid ${THEME.accentBlue}` : '2px solid transparent',
       marginBottom: -2,
     }}>
       {label}
@@ -190,7 +191,7 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
 
 function Tag({ children }: { children: string }) {
   return (
-    <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: '#eef2ff', color: '#4f46e5' }}>
+    <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: THEME.accentBlueLight, color: THEME.accentBlue }}>
       {children}
     </span>
   )
@@ -200,7 +201,7 @@ function AnnotationGuide() {
   return (
     <div style={{ marginTop: 32 }}>
       <h3>Integration Guide — Data Annotation</h3>
-      <p style={{ color: '#666', fontSize: 13, marginBottom: 16 }}>
+      <p style={{ color: THEME.textSecondary, fontSize: 13, marginBottom: 16 }}>
         Two ways to use this service: quick MCP call, or full flow with A2A consultation and free quota.
       </p>
 
@@ -250,22 +251,15 @@ const status = await client.callTool({
 
 function GuideSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }}>
+    <div style={styles.section}>
       <h4 style={{ margin: '0 0 8px', fontSize: 14 }}>{title}</h4>
-      <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{children}</div>
+      <div style={{ fontSize: 13, color: THEME.textPrimary, lineHeight: 1.6 }}>{children}</div>
     </div>
   )
 }
 
 function Code({ children }: { children: string }) {
   return (
-    <pre style={{
-      background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6,
-      fontSize: 12, lineHeight: 1.5, overflow: 'auto', margin: '8px 0',
-    }}>{children}</pre>
+    <pre style={styles.code}>{children}</pre>
   )
-}
-
-const cardStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb', borderRadius: 8, padding: 16, background: 'white', cursor: 'pointer',
 }

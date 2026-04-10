@@ -1,5 +1,6 @@
 import { useParams, Link } from 'react-router-dom'
 import { useDIDDocument } from '../hooks/useDIDDocument'
+import { THEME, styles } from '../lib/theme'
 
 export function DIDDocumentPage() {
   const { identifier } = useParams()
@@ -10,32 +11,32 @@ export function DIDDocumentPage() {
 
   return (
     <div>
-      <Link to="/agents" style={{ fontSize: 13, color: '#666' }}>&larr; Back</Link>
+      <Link to="/agents" style={{ fontSize: 13, color: THEME.textSecondary }}>&larr; Back</Link>
       <h2>did:codatta:{doc.idHex}</h2>
 
-      <section style={sectionStyle}>
+      <section style={styles.section}>
         <h3>Identity</h3>
-        <table style={tableStyle}>
+        <table style={styles.table}>
           <tbody>
-            <tr><td style={labelStyle}>DID</td><td style={valStyle}>did:codatta:{doc.idHex}</td></tr>
-            <tr><td style={labelStyle}>Owner</td><td style={valStyle}>{doc.owner}</td></tr>
+            <tr><td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>DID</td><td style={{ ...styles.td, ...styles.mono }}>did:codatta:{doc.idHex}</td></tr>
+            <tr><td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>Owner</td><td style={{ ...styles.td, ...styles.mono }}>{doc.owner}</td></tr>
             {doc.controllers.length > 0 && (
-              <tr><td style={labelStyle}>Controllers</td><td style={valStyle}>{doc.controllers.map(c => c.toString(16)).join(', ')}</td></tr>
+              <tr><td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>Controllers</td><td style={{ ...styles.td, ...styles.mono }}>{doc.controllers.map(c => c.toString(16)).join(', ')}</td></tr>
             )}
           </tbody>
         </table>
       </section>
 
       {doc.kvAttributes.length > 0 && (
-        <section style={sectionStyle}>
+        <section style={styles.section}>
           <h3>Key-Value Attributes</h3>
-          <table style={tableStyle}>
-            <thead><tr><th style={thStyle}>Key</th><th style={thStyle}>Value</th></tr></thead>
+          <table style={styles.table}>
+            <thead><tr><th style={styles.th}>Key</th><th style={styles.th}>Value</th></tr></thead>
             <tbody>
               {doc.kvAttributes.map((attr, i) => (
                 <tr key={i}>
-                  <td style={labelStyle}>{attr.name}</td>
-                  <td style={{ ...valStyle, wordBreak: 'break-all' }}>{attr.value}</td>
+                  <td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>{attr.name}</td>
+                  <td style={{ ...styles.td, ...styles.mono, wordBreak: 'break-all' }}>{attr.value}</td>
                 </tr>
               ))}
             </tbody>
@@ -44,11 +45,11 @@ export function DIDDocumentPage() {
       )}
 
       {doc.arrayAttributes.filter(a => a.items.length > 0).map((attr, i) => (
-        <section key={i} style={sectionStyle}>
+        <section key={i} style={styles.section}>
           <h3>{attr.name} ({attr.items.length})</h3>
           {attr.items.map((item, j) => (
-            <div key={j} style={{ marginBottom: 8, padding: 10, background: item.revoked ? '#fef2f2' : '#f9fafb', borderRadius: 6, fontSize: 13 }}>
-              {item.revoked && <span style={{ color: '#dc2626', fontWeight: 'bold' }}>[revoked] </span>}
+            <div key={j} style={{ marginBottom: 8, padding: 10, background: item.revoked ? 'rgba(239,68,68,0.04)' : THEME.canvas, borderRadius: THEME.radiusInput, fontSize: 13 }}>
+              {item.revoked && <span style={{ color: THEME.danger, fontWeight: 'bold' }}>[revoked] </span>}
               {item.isJson ? (
                 <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}>
                   {JSON.stringify(item.parsed, null, 2)}
@@ -62,14 +63,8 @@ export function DIDDocumentPage() {
       ))}
 
       {doc.arrayAttributes.every(a => a.items.length === 0) && doc.kvAttributes.length === 0 && (
-        <p style={{ color: '#999', marginTop: 20 }}>No attributes set.</p>
+        <p style={{ color: THEME.textMuted, marginTop: 20 }}>No attributes set.</p>
       )}
     </div>
   )
 }
-
-const sectionStyle: React.CSSProperties = { marginTop: 24, border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }
-const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse' }
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #eee', fontSize: 12, color: '#999' }
-const labelStyle: React.CSSProperties = { padding: '6px 10px', fontWeight: 'bold', width: 140, borderBottom: '1px solid #f5f5f5' }
-const valStyle: React.CSSProperties = { padding: '6px 10px', fontFamily: 'monospace', fontSize: 12, borderBottom: '1px solid #f5f5f5' }
