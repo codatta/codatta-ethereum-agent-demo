@@ -117,7 +117,7 @@ async function main() {
   await startEventListener();
 
   const app = express();
-  app.use(express.json());
+  // CORS must be before json parser
   app.use((_req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "*");
@@ -125,6 +125,7 @@ async function main() {
     if (_req.method === "OPTIONS") { res.sendStatus(200); return; }
     next();
   });
+  app.use(express.json());
 
   // POST /generate — Provider requests an invite code
   app.post("/generate", async (req, res) => {
