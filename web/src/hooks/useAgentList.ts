@@ -25,11 +25,12 @@ export function useAgentList() {
     async function fetchAgents() {
       try {
         setLoading(true)
+        const abi = parseAbi(identityRegistryAbi as unknown as string[])
+
+        // Get all registered agent IDs from events
         const logs = await client!.getLogs({
           address: addresses.identityRegistry,
-          event: parseAbi(identityRegistryAbi as unknown as string[]).find(
-            (x) => 'name' in x && x.name === 'Registered'
-          )!,
+          event: abi.find((x) => 'name' in x && x.name === 'Registered')!,
           fromBlock: 0n,
           toBlock: 'latest',
         })
@@ -37,16 +38,22 @@ export function useAgentList() {
         const results: AgentSummary[] = []
 
         for (const log of logs) {
-          const decoded = decodeEventLog({
-            abi: parseAbi(identityRegistryAbi as unknown as string[]),
-            data: log.data,
-            topics: log.topics,
-          })
+          const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics })
           const agentId = (decoded.args as any).agentId as bigint
           const owner = (decoded.args as any).owner as string
-          const tokenUri = (decoded.args as any).tokenURI as string
 
-          const regFile = parseRegistrationFile(tokenUri)
+          // Read CURRENT tokenURI from chain (not event snapshot)
+          let regFile: RegistrationFile | null = null
+          try {
+            const tokenUri = await client!.readContract({
+              address: addresses.identityRegistry,
+              abi,
+              functionName: 'tokenURI',
+              args: [agentId],
+            }) as string
+            regFile = parseRegistrationFile(tokenUri)
+          } catch {}
+
           results.push({
             agentId,
             owner,
