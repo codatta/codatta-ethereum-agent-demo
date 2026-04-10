@@ -5,6 +5,7 @@ import {Script, console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {DIDRegistry} from "../src/did/DIDRegistry.sol";
 import {DIDRegistrar} from "../src/did/DIDRegistrar.sol";
+import {InviteRegistrar} from "../src/did/InviteRegistrar.sol";
 import {IdentityRegistry} from "../src/erc8004/IdentityRegistry.sol";
 import {ReputationRegistry} from "../src/erc8004/ReputationRegistry.sol";
 import {ValidationRegistry} from "../src/erc8004/ValidationRegistry.sol";
@@ -27,9 +28,14 @@ contract Deploy is Script {
         DIDRegistrar didRegistrar = new DIDRegistrar(address(didProxy));
         console.log("DIDRegistrar:", address(didRegistrar));
 
-        // Authorize registrar
-        address[] memory addings = new address[](1);
+        // Invite Registrar (deployer is the invite signer for demo)
+        InviteRegistrar inviteRegistrar = new InviteRegistrar(address(didProxy), deployer);
+        console.log("InviteRegistrar:", address(inviteRegistrar));
+
+        // Authorize both registrars
+        address[] memory addings = new address[](2);
         addings[0] = address(didRegistrar);
+        addings[1] = address(inviteRegistrar);
         address[] memory removings = new address[](0);
         DIDRegistry(address(didProxy)).updateRegistrars(addings, removings);
 
@@ -49,6 +55,7 @@ contract Deploy is Script {
         string memory obj = "d";
         vm.serializeAddress(obj, "didRegistry", address(didProxy));
         vm.serializeAddress(obj, "didRegistrar", address(didRegistrar));
+        vm.serializeAddress(obj, "inviteRegistrar", address(inviteRegistrar));
         vm.serializeAddress(obj, "identityRegistry", address(identity));
         vm.serializeAddress(obj, "reputationRegistry", address(reputation));
         string memory result = vm.serializeAddress(obj, "validationRegistry", address(validation));
