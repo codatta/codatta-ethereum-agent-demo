@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useAgentList } from '../hooks/useAgentList'
+import { THEME, styles } from '../lib/theme'
 
 const SERVICE_CATALOG = [
   {
@@ -39,7 +40,6 @@ const SERVICE_CATALOG = [
 export function Services() {
   const { agents } = useAgentList()
 
-  // Count agents per service type (by keyword matching in description)
   function countAgents(type: string): number {
     if (type === 'annotation') {
       return agents.filter(a => {
@@ -52,8 +52,8 @@ export function Services() {
 
   return (
     <div>
-      <h2>Codatta Data Services</h2>
-      <p style={{ color: '#666', marginBottom: 24 }}>
+      <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Codatta Data Services</h2>
+      <p style={{ color: THEME.textSecondary, marginBottom: 24 }}>
         AI-powered data services built on the Codatta data production ecosystem.
         Browse services, discover agents, and integrate via MCP protocol.
       </p>
@@ -65,9 +65,10 @@ export function Services() {
 
           return (
             <div key={svc.type} style={{
-              ...cardStyle,
-              opacity: isAvailable ? 1 : 0.6,
+              ...styles.card,
+              opacity: isAvailable ? 1 : 0.55,
               cursor: isAvailable ? 'pointer' : 'default',
+              transition: 'box-shadow 0.2s',
             }}>
               {isAvailable ? (
                 <Link to={`/service/${svc.type}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
@@ -81,7 +82,7 @@ export function Services() {
         })}
       </div>
 
-      <div style={{ marginTop: 32, padding: 16, background: '#f5f3ff', borderRadius: 8 }}>
+      <div style={{ ...styles.card, marginTop: 24, background: THEME.accentBlueLight }}>
         <p style={{ margin: 0, fontSize: 13 }}>
           <strong>Want to provide data services?</strong> Connect your wallet and{' '}
           <Link to="/register-agent">register as a Provider</Link>.
@@ -98,34 +99,29 @@ function CardContent({ svc, agentCount }: { svc: typeof SERVICE_CATALOG[0]; agen
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
         <div style={{ flex: 1 }}>
-          <h3 style={{ margin: '0 0 6px' }}>{svc.name}</h3>
-          <p style={{ margin: 0, fontSize: 13, color: '#666', lineHeight: 1.5 }}>{svc.description}</p>
+          <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>{svc.name}</h3>
+          <p style={{ margin: 0, fontSize: 13, color: THEME.textSecondary, lineHeight: 1.6 }}>{svc.description}</p>
         </div>
         <span style={{
-          padding: '2px 10px', borderRadius: 12, fontSize: 12, flexShrink: 0, marginLeft: 12,
-          background: isAvailable ? '#dcfce7' : '#f3f4f6',
-          color: isAvailable ? '#166534' : '#9ca3af',
+          ...styles.badge(isAvailable ? THEME.success : THEME.textMuted),
+          flexShrink: 0, marginLeft: 12,
         }}>
           {isAvailable ? 'Available' : 'Coming Soon'}
         </span>
       </div>
 
-      <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, marginTop: 14, flexWrap: 'wrap' }}>
         {svc.taskTypes.map(t => (
-          <span key={t} style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: '#f3f4f6', color: '#6b7280' }}>
+          <span key={t} style={{ padding: '3px 10px', borderRadius: 8, fontSize: 11, background: THEME.canvas, color: THEME.textSecondary, fontWeight: 500 }}>
             {t}
           </span>
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 20, marginTop: 12, fontSize: 12, color: '#999' }}>
-        <span>Protocol: <strong style={{ color: '#374151' }}>{svc.protocol}</strong></span>
-        {isAvailable && <span>Providers: <strong style={{ color: '#374151' }}>{agentCount}</strong></span>}
+      <div style={{ display: 'flex', gap: 20, marginTop: 14, fontSize: 12, color: THEME.textMuted }}>
+        <span>Protocol: <strong style={{ color: THEME.textPrimary }}>{svc.protocol}</strong></span>
+        {isAvailable && <span>Providers: <strong style={{ color: THEME.textPrimary }}>{agentCount}</strong></span>}
       </div>
     </>
   )
-}
-
-const cardStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb', borderRadius: 8, padding: 20, background: 'white',
 }
