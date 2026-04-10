@@ -246,7 +246,7 @@ async function main() {
       // Step 1: Initialize MCP session
       const initRes = await fetch(mcpUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Accept": "application/json, text/event-stream" },
         body: JSON.stringify({
           jsonrpc: "2.0", id: 1, method: "initialize",
           params: {
@@ -263,7 +263,7 @@ async function main() {
       }
 
       const sessionId = initRes.headers.get("mcp-session-id");
-      const mcpHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      const mcpHeaders: Record<string, string> = { "Content-Type": "application/json", "Accept": "application/json, text/event-stream" };
       if (sessionId) mcpHeaders["mcp-session-id"] = sessionId;
 
       // Step 2: List tools
