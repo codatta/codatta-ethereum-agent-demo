@@ -285,10 +285,10 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
   const [errorMsg, setErrorMsg] = useState('')
 
   const topAgent = agents[0]
-  const webEndpoint = topAgent?.services.find(s => s.name === 'web')?.endpoint
+  const mcpEndpoint = topAgent?.services.find(s => s.name === 'MCP')?.endpoint
 
   async function handleRun() {
-    if (!webEndpoint) { setErrorMsg('No service endpoint available'); return }
+    if (!mcpEndpoint) { setErrorMsg('No provider available'); return }
     setStatus('submitting')
     setResult(null)
     setErrorMsg('')
@@ -297,13 +297,14 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
     if (images.length === 0) { setErrorMsg('Enter at least one image URL'); setStatus('idle'); return }
 
     try {
-      const res = await fetch(`${webEndpoint}/annotate`, {
+      const res = await fetch('http://127.0.0.1:4060/try-annotate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images, task }),
+        body: JSON.stringify({ mcpUrl: mcpEndpoint, images, task }),
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) throw new Error(`Service unavailable: HTTP ${res.status}`)
       const data = await res.json() as any
+      if (data.error) throw new Error(data.error)
       setResult(data)
       setStatus('done')
     } catch (err: any) {
@@ -318,7 +319,7 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
         Try the annotation service directly from your browser. This calls the MCP endpoint of the top-ranked provider.
       </p>
 
-      {!webEndpoint ? (
+      {!mcpEndpoint ? (
         <div style={styles.card}>
           <p style={{ color: THEME.textMuted }}>No provider available yet.</p>
         </div>

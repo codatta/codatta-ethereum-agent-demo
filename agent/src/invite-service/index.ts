@@ -403,6 +403,44 @@ async function main() {
     });
   });
 
+  // ── Try it proxy — calls Provider's REST /annotate via backend ──
+
+  app.post("/try-annotate", async (req, res) => {
+    const { mcpUrl, images, task } = req.body;
+    if (!mcpUrl || !images) {
+      res.status(400).json({ error: "mcpUrl and images required" });
+      return;
+    }
+
+    // Derive REST endpoint from MCP URL: replace /mcp with nothing, port - 1
+    // e.g., http://host:4022/mcp → http://host:4021/annotate
+    try {
+      const url = new URL(mcpUrl);
+      const mcpPort = parseInt(url.port);
+      url.port = (mcpPort - 1).toString();
+      url.pathname = "/annotate";
+      const restUrl = url.toString();
+
+      log.info(`Try-it proxy: ${restUrl} (${images.length} images)`);
+
+      const annotateRes = await fetch(restUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images, task: task || "object-detection" }),
+      });
+
+      if (!annotateRes.ok) {
+        res.json({ error: `Provider returned HTTP ${annotateRes.status}` });
+        return;
+      }
+
+      const data = await annotateRes.json();
+      res.json(data);
+    } catch (err: any) {
+      res.json({ error: `Cannot reach provider: ${err.message}` });
+    }
+  });
+
   // ── Health ──────────────────────────────────────────────────
 
   app.get("/health", (_req, res) => {
