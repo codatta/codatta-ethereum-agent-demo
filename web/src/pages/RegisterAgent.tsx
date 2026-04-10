@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useWriteContract, usePublicClient } from 'wagmi'
 import { injected } from 'wagmi/connectors'
-import { parseAbi, decodeEventLog, encodeAbiParameters, toHex } from 'viem'
+import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toHex } from 'viem'
 import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
 import { Link } from 'react-router-dom'
 import { THEME, styles } from '../lib/theme'
@@ -27,10 +27,57 @@ export function RegisterAgent() {
   const [didHex, setDidHex] = useState('')
   const [agentId, setAgentId] = useState('')
   const [existingDid, setExistingDid] = useState('')
+  const [detectedDid, setDetectedDid] = useState<string | null>(null)
+  const [detectingDid, setDetectingDid] = useState(false)
   const [verifyStatus, setVerifyStatus] = useState<'idle' | 'checking' | 'pass' | 'fail'>('idle')
   const [verifyError, setVerifyError] = useState('')
   const [txLoading, setTxLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const { address } = useAccount()
+
+  // Detect existing DID from on-chain agents owned by this wallet
+  useEffect(() => {
+    if (!client || !address || step !== 'did' || detectedDid) return
+    let cancelled = false
+
+    async function detect() {
+      setDetectingDid(true)
+      try {
+        const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
+        const regEvent = identAbi.find(x => 'name' in x && x.name === 'Registered')!
+        const logs = await client!.getLogs({
+          address: addresses.identityRegistry, event: regEvent,
+          fromBlock: 0n, toBlock: 'latest',
+        })
+
+        for (const log of logs) {
+          const decoded = decodeEventLog({ abi: identAbi, data: log.data, topics: log.topics })
+          const owner = (decoded.args as any).owner as string
+          if (owner.toLowerCase() !== address!.toLowerCase()) continue
+
+          const agentId = (decoded.args as any).agentId as bigint
+          try {
+            const didBytes = await client!.readContract({
+              address: addresses.identityRegistry, abi: identAbi,
+              functionName: 'getMetadata', args: [agentId, 'codatta:did'],
+            }) as `0x${string}`
+            const [did] = decodeAbiParameters([{ type: 'uint128' }], didBytes)
+            const hex = (did as bigint).toString(16)
+            if (!cancelled) {
+              setDetectedDid(hex)
+              setExistingDid(`did:codatta:${hex}`)
+            }
+            return
+          } catch {}
+        }
+      } catch {}
+      if (!cancelled) setDetectingDid(false)
+    }
+
+    detect()
+    return () => { cancelled = true }
+  }, [client, address, step, detectedDid])
 
   if (!isConnected) {
     return (
@@ -94,13 +141,13 @@ export function RegisterAgent() {
         <h2>Register Agent</h2>
         <StepIndicator current="did" />
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
-          Your Agent needs a Codatta DID. If you already have one, enter it below.
+          Your Agent needs a Codatta DID. {detectedDid ? 'We found an existing DID for your wallet.' : 'If you already have one, enter it below.'}
         </p>
 
         <div style={{ display: 'grid', gap: 16, maxWidth: 500 }}>
-          {/* Existing DID */}
-          <div style={styles.card}>
-            <strong>I already have a Codatta DID</strong>
+          {/* Detected / Existing DID */}
+          <div style={{ ...styles.card, border: detectedDid ? `2px solid ${THEME.success}` : undefined }}>
+            <strong>{detectedDid ? 'Existing DID found' : 'I already have a Codatta DID'}</strong>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <input
                 placeholder="did:codatta:abc123..."
@@ -114,11 +161,16 @@ export function RegisterAgent() {
                   if (hex) { setDidHex(hex); setStep('agent') }
                 }}
                 disabled={!existingDid}
-                style={{ ...styles.btnSecondary, opacity: existingDid ? 1 : 0.4 }}
+                style={{ ...styles.btnPrimary, opacity: existingDid ? 1 : 0.4, whiteSpace: 'nowrap' }}
               >
-                Use this DID
+                {detectedDid ? 'Use this DID' : 'Use DID'}
               </button>
             </div>
+            {detectedDid && (
+              <p style={{ margin: '6px 0 0', fontSize: 12, color: THEME.success }}>
+                Auto-detected from your existing agents
+              </p>
+            )}
           </div>
 
           {/* Register new */}
