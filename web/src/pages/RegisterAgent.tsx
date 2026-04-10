@@ -345,7 +345,7 @@ export function RegisterAgent() {
 
         <div style={{ ...styles.card, marginBottom: 16 }}>
           <p style={{ margin: 0, fontSize: 13 }}>
-            <strong>Agent ID:</strong> <span style={styles.mono}>{agentId.slice(0, 20)}...</span>
+            <strong>Agent ID:</strong> <span style={{ ...styles.mono, userSelect: 'all' }}>{agentId}</span>
           </p>
           <p style={{ margin: '4px 0 0', fontSize: 13 }}>
             <strong>DID:</strong> <span style={styles.mono}>did:codatta:{didHex}</span>
