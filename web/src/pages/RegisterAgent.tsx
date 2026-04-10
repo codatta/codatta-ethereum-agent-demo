@@ -427,6 +427,18 @@ export function RegisterAgent() {
           </button>
         </div>
 
+        {/* Demo download hint */}
+        <div style={{ ...styles.card, marginTop: 12, maxWidth: 500, background: THEME.accentBlueLight }}>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            <strong>Don't have a service yet?</strong> Download and run the pre-built provider:
+          </p>
+          <pre style={{ ...styles.code, margin: '8px 0 0', fontSize: 11 }}>{`git clone <repo-url>
+cd agent && npm install
+cp .env.example .env && ./sync-env.sh
+npm run start:provider
+# MCP URL will be: http://localhost:4022/mcp`}</pre>
+        </div>
+
         {verifyStatus === 'pass' && (
           <div style={{ ...styles.card, marginTop: 16, background: 'rgba(34,197,94,0.06)' }}>
             <p style={{ margin: 0, color: THEME.success, fontWeight: 600 }}>✅ Verification passed!</p>

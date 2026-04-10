@@ -268,32 +268,6 @@ export function ProviderDashboard() {
           </StepCard>
         </div>
 
-        {/* Quick Start Download */}
-        <div style={{ ...styles.card, marginTop: 20 }}>
-          <h4 style={{ margin: '0 0 8px' }}>Quick Start: Download & Run</h4>
-          <p style={{ fontSize: 13, color: THEME.textSecondary, margin: '0 0 12px' }}>
-            Get the pre-built Provider agent running in minutes. Includes MCP annotation service, A2A consultation, and automatic identity registration.
-          </p>
-          <pre style={styles.code}>{`# Clone the repository
-git clone https://github.com/codatta/codatta-ethereum-agent-demo.git
-cd codatta-ethereum-agent-demo/agent
-
-# Install dependencies
-npm install
-
-# Configure
-cp .env.example .env
-./sync-env.sh
-
-# Start the Provider agent
-npm run start:provider
-
-# The agent will:
-# 1. Register Codatta DID + ERC-8004 identity
-# 2. Start MCP server (annotation tools)
-# 3. Start A2A server (consultation)
-# 4. Wait for client requests`}</pre>
-        </div>
       </div>
       )}
     </div>

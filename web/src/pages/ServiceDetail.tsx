@@ -254,8 +254,8 @@ const status = await client.callTool({
             It walks through the complete flow: A2A consultation, DID registration, MCP annotation, and reputation feedback.
           </p>
           <Code>{`# Clone the repository
-git clone https://github.com/codatta/codatta-ethereum-agent-demo.git
-cd codatta-ethereum-agent-demo/agent
+git clone <repo-url>
+cd agent
 
 # Install dependencies
 npm install
