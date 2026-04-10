@@ -39,3 +39,7 @@
 - [ ] **CodattaFrontierRegistry 合约** — Frontier 注册、费率配置
 - [ ] **激励机制** — 信誉联动、等级加成
 - [ ] **ERC-8021 App Code** — 多平台参与后启用引流归因
+
+## 代码整理
+
+- [ ] **DID 合约回迁 codatta-did repo** — 当前 src/did/ 是从 codatta-did 复制的，InviteRegistrar 也写在这里。需要将改动合并回 codatta-did 项目，这边改为 submodule 引用
