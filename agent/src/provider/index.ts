@@ -563,7 +563,7 @@ async function main() {
         const invite = await requestInviteCode(wallet.address, clientAddress);
 
         if (!invite) {
-          // Already has an invite or service unavailable
+          // Invite Service unavailable
           eventBus.publish({
             kind: "task",
             id: ctx.taskId,
@@ -574,8 +574,8 @@ async function main() {
               messageId: `resp-${Date.now()}`,
               parts: [{
                 type: "text",
-                text: "An invite has already been issued for this address. " +
-                  "Use your existing invite to register a Codatta DID via the InviteRegistrar contract.",
+                text: "Sorry, the invite service is currently unavailable. " +
+                  "You can still use our annotation service directly via MCP.",
               }],
             }],
           } as any);
