@@ -26,6 +26,14 @@ const SERVICE_CATALOG = [
     protocol: 'MCP / x402',
     status: 'coming-soon' as const,
   },
+  {
+    type: 'cda-reporter',
+    name: 'CDA Reporter',
+    description: 'Automated reporting and analytics for on-chain data assets. Generate insights, track data lineage, and produce compliance reports powered by Codatta data intelligence.',
+    taskTypes: ['Data Reports', 'Lineage Tracking', 'Compliance Audit'],
+    protocol: 'MCP / A2A',
+    status: 'coming-soon' as const,
+  },
 ]
 
 export function Services() {
