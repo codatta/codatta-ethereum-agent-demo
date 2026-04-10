@@ -4,6 +4,7 @@ export const DIDRegistrarABI = [
 
 export const InviteRegistrarABI = [
   "function registerWithInvite(address inviter, uint256 nonce, bytes signature) external",
+  "function registerFor(address owner, address inviter, uint256 nonce, bytes signature) external",
   "event InviteRegistered(uint128 indexed identifier, address indexed owner, address indexed inviter, uint256 nonce)",
 ];
 

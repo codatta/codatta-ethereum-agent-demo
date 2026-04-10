@@ -503,14 +503,14 @@ async function main() {
 
   const a2aAgentCard: AgentCard = {
     name: "Codatta Annotation Agent",
-    description: "Pre-sales consultation for data annotation services. Ask about capabilities, pricing, and DID registration benefits.",
+    description: "Image annotation service by Codatta. Supports object detection, semantic segmentation, and classification for autonomous driving datasets.",
     url: `http://localhost:${A2A_PORT}`,
     provider: { organization: "Codatta", url: "https://codatta.io" },
     version: "1.0.0",
     capabilities: { streaming: false, pushNotifications: false },
     skills: [
-      { id: "consult", name: "Service Consultation", description: "Ask about annotation capabilities, pricing, and free quota" },
-      { id: "invite", name: "DID Invite", description: "Get an invite code for free annotation quota" },
+      { id: "consult", name: "Service Consultation", description: "Ask about annotation capabilities, pricing, supported task types, and how to integrate via MCP" },
+      { id: "invite", name: "DID Registration", description: "Get an invite code to register a Codatta DID with free annotation credits. Provider can register on behalf of clients without ETH" },
     ],
   };
 
@@ -526,7 +526,7 @@ async function main() {
       log.event("A2A consultation", `context=${contextKey}, state=${state}`);
 
       if (state === "initial") {
-        // First message — introduce services and ask about needs
+        // First message — complete self-service info for LLM agents
         this.conversationState.set(contextKey, "consulting");
         eventBus.publish({
           kind: "task",
@@ -539,13 +539,32 @@ async function main() {
             parts: [
               {
                 type: "text",
-                text: "Hi! I'm the Codatta Annotation Agent. I provide data annotation services including:\n\n" +
-                  "• **Object detection** — bounding boxes for cars, pedestrians, etc.\n" +
-                  "• **Segmentation** — pixel-level labeling\n" +
-                  "• **Classification** — image/text categorization\n\n" +
-                  "Pricing: $0.05/image for standard annotation.\n\n" +
-                  "🎁 **New user offer**: Register a Codatta DID and get **10 free annotations**!\n" +
-                  "Would you like an invite code?",
+                text: "Hi! I'm the Codatta Annotation Agent. Here's everything you need to use our service:\n\n" +
+                  "**Service:** Image annotation (object detection, segmentation, classification)\n" +
+                  "**Pricing:** $0.05/image (x402 payment), or free with invite code\n\n" +
+                  "**How to use (MCP):**\n" +
+                  `1. Connect to MCP endpoint: ${mcpEndpointUrl}\n` +
+                  "2. Call tools/list to discover: annotate, get_task_status\n" +
+                  "3. Call annotate(images, task) → returns taskId\n" +
+                  "4. Poll get_task_status(taskId) until completed\n\n" +
+                  "**Free credits:** Reply with your wallet address to get an invite code.\n" +
+                  "We can register a Codatta DID for you (no ETH needed, we pay gas).\n\n" +
+                  "**Codatta also offers:** Data Validation, Data Access, CDA Reporter (coming soon).\n" +
+                  "Ask me anything!",
+              },
+              {
+                type: "data",
+                data: {
+                  action: "service-info",
+                  service: "annotation",
+                  provider: "Codatta",
+                  mcpEndpoint: mcpEndpointUrl,
+                  mcpTools: ["annotate", "get_task_status"],
+                  pricing: { perImage: "$0.05", currency: "USDC", protocol: "x402" },
+                  inviteRegistrar: addresses.inviteRegistrar,
+                  supportedTasks: ["object-detection", "segmentation", "classification"],
+                  otherServices: ["validation (coming soon)", "data-access (coming soon)", "cda-reporter (coming soon)"],
+                },
               },
             ],
           }],

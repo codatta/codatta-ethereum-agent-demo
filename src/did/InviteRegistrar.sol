@@ -9,15 +9,17 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title InviteRegistrar
- * @notice Registers DIDs using signed invite codes.
+ * @notice Registers DIDs using signed invite codes. Supports both self-registration
+ *         and proxy registration (Provider registers on behalf of Client).
  *
- * Flow:
- *   1. Provider requests invite code from Invite Service
- *   2. Invite Service signs: keccak256(provider, client, nonce, chainId, contractAddress)
- *   3. Client calls registerWithInvite(inviteCode) → DID registered + invite recorded
+ * Self-registration flow:
+ *   1. Client calls registerWithInvite(inviter, nonce, signature)
+ *   2. DID owner = msg.sender
  *
- * The invite code signature is verified against the authorized signer (Invite Service).
- * Each invite code (by nonce) can only be used once.
+ * Proxy registration flow:
+ *   1. Provider calls registerFor(owner, inviter, nonce, signature)
+ *   2. DID owner = specified owner address (e.g., Client's owner wallet)
+ *   3. Provider pays gas, Client doesn't need ETH
  */
 contract InviteRegistrar is Ownable {
     using ECDSA for bytes32;
@@ -44,21 +46,49 @@ contract InviteRegistrar is Ownable {
     }
 
     /**
-     * @notice Register a DID using a signed invite code
+     * @notice Register a DID using a signed invite code (self-registration)
      * @param inviter The provider who generated the invite
      * @param nonce Unique nonce for this invite (prevents replay)
-     * @param signature Invite Service's signature over (inviter, client, nonce, chainId, contractAddress)
+     * @param signature Invite Service's signature over (inviter, owner, nonce, chainId, contractAddress)
      */
     function registerWithInvite(
         address inviter,
         uint256 nonce,
         bytes calldata signature
     ) external {
+        _register(msg.sender, inviter, nonce, signature);
+    }
+
+    /**
+     * @notice Register a DID on behalf of another address (proxy registration)
+     * @dev Allows Provider to register DID for a Client who has no ETH.
+     *      The signature must be over the actual owner address, not msg.sender.
+     * @param owner The address that will own the DID
+     * @param inviter The provider who generated the invite
+     * @param nonce Unique nonce for this invite (prevents replay)
+     * @param signature Invite Service's signature over (inviter, owner, nonce, chainId, contractAddress)
+     */
+    function registerFor(
+        address owner,
+        address inviter,
+        uint256 nonce,
+        bytes calldata signature
+    ) external {
+        require(owner != address(0), "Invalid owner");
+        _register(owner, inviter, nonce, signature);
+    }
+
+    function _register(
+        address owner,
+        address inviter,
+        uint256 nonce,
+        bytes calldata signature
+    ) internal {
         require(!usedNonces[nonce], "Invite already used");
 
-        // Verify signature: Invite Service signed (inviter, client, nonce, chainId, contractAddress)
+        // Verify signature: Invite Service signed (inviter, owner, nonce, chainId, contractAddress)
         bytes32 messageHash = keccak256(
-            abi.encodePacked(inviter, msg.sender, nonce, block.chainid, address(this))
+            abi.encodePacked(inviter, owner, nonce, block.chainid, address(this))
         );
         bytes32 ethSignedHash = messageHash.toEthSignedMessageHash();
         address recovered = ethSignedHash.recover(signature);
@@ -67,11 +97,11 @@ contract InviteRegistrar is Ownable {
         // Mark nonce as used
         usedNonces[nonce] = true;
 
-        // Register DID
+        // Register DID with specified owner
         uint128 identifier = DIDGenerator.generateUuidv4Uint128();
-        registry.register(identifier, msg.sender);
+        registry.register(identifier, owner);
 
-        emit InviteRegistered(identifier, msg.sender, inviter, nonce);
+        emit InviteRegistered(identifier, owner, inviter, nonce);
     }
 
     /**

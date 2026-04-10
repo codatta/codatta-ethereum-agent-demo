@@ -51,7 +51,7 @@
 ## Blockers（来自 design/demo-flow-and-blockers.md）
 
 - [ ] **P0: 无钱包 Agent 的注册和支付** — 钱包托管或代理机制
-- [ ] **P0: Codatta Agent SDK / CLI** — Agent 安装后自动具备服务能力，无需 owner 开发代码
+- [ ] **P0: Codatta Agent SDK / CLI** — Agent 安装后自动具备服务能力，无需 owner 开发代码。CLI 面向人类用户，MCP 面向 Agent，底层共享逻辑
 - [ ] **P1: Owner 确认机制** — 招募操作需 owner 在 Web 确认
 - [ ] **P1: DID 签名验证** — Agent 证明 DID 持有权
 - [ ] **P1: 服务选择和能力要求定义** — Agent 选择提供哪些服务，需要什么能力
