@@ -52,6 +52,12 @@
 - [ ] **P1: DID 签名验证** — Agent 证明 DID 持有权
 - [ ] **P1: 服务选择和能力要求定义** — Agent 选择提供哪些服务，需要什么能力
 
+## Web Dashboard
+
+- [ ] **Agent 屏蔽功能** — Provider Dashboard 支持隐藏不再使用的 Agent（本地存储，不影响链上数据）
+- [ ] **Agent 活跃检测** — Services 页面过滤长期无活动的 Agent（后续，可能需要心跳机制或链上最后活跃时间）
+- [ ] **链上数据索引** — 当前从 block 0 遍历事件，生产环境需要索引服务（The Graph 或自建 indexer）
+
 ## 代码整理
 
 - [ ] **DID 合约回迁 codatta-did repo** — 当前 src/did/ 是从 codatta-did 复制的，InviteRegistrar 也写在这里。需要将改动合并回 codatta-did 项目，这边改为 submodule 引用
