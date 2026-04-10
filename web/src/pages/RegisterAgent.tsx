@@ -5,6 +5,7 @@ import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toH
 import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
 import { Link } from 'react-router-dom'
 import { THEME, styles } from '../lib/theme'
+import { NetworkCheck } from '../components/NetworkCheck'
 
 const SERVICE_TYPES = [
   { id: 'annotation', name: 'Data Annotation', description: 'Image labeling, object detection, segmentation, classification', requiredTools: ['annotate', 'get_task_status'] },
@@ -82,6 +83,7 @@ export function RegisterAgent() {
     return (
       <div>
         <h2>New Agent</h2>
+        <NetworkCheck />
         <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>Connect your wallet to create a new agent.</p>
         <button onClick={() => connect({ connector: injected() })} style={styles.btnPrimary}>
           Connect Wallet
@@ -95,6 +97,7 @@ export function RegisterAgent() {
     return (
       <div>
         <h2>New Agent</h2>
+        <NetworkCheck />
         <StepIndicator current="service" />
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>Choose the type of service your Agent will provide.</p>
 
@@ -138,6 +141,7 @@ export function RegisterAgent() {
     return (
       <div>
         <h2>New Agent</h2>
+        <NetworkCheck />
         <StepIndicator current="did" />
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
           Your Agent needs a Codatta DID. {detectedDid ? 'We found an existing DID for your wallet.' : 'If you already have one, enter it below.'}
@@ -230,6 +234,7 @@ export function RegisterAgent() {
     return (
       <div>
         <h2>New Agent</h2>
+        <NetworkCheck />
         <StepIndicator current="agent" />
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
           Register your agent on ERC-8004 and link it to your DID.
@@ -342,6 +347,7 @@ export function RegisterAgent() {
     return (
       <div>
         <h2>New Agent</h2>
+        <NetworkCheck />
         <StepIndicator current="verify" />
 
         <div style={{ ...styles.card, marginBottom: 16 }}>
