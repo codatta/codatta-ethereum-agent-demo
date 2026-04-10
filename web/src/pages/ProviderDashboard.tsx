@@ -115,20 +115,36 @@ export function ProviderDashboard() {
   }
 
   const { hidden, hideAgent, showAgent } = useHiddenAgents()
+  const [showHidden, setShowHidden] = useState(false)
 
   if (loading) return <p>Loading your agents...</p>
 
+  const filteredAgents = agents.filter(a => showHidden ? hidden.has(a.agentId.toString()) : !hidden.has(a.agentId.toString()))
+
   return (
     <div>
-      <h2>Provider Dashboard</h2>
-      <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
-        Manage your registered agents. Wallet: <code style={{ ...styles.mono, fontSize: 12 }}>{address?.slice(0, 10)}...{address?.slice(-4)}</code>
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>My Agents</h2>
+          <p style={{ color: THEME.textSecondary, margin: '4px 0 0', fontSize: 13 }}>
+            {agents.length} agent(s) registered
+          </p>
+        </div>
+        <Link to="/register-agent" style={{ ...styles.btnPrimary, textDecoration: 'none' }}>+ New Agent</Link>
+      </div>
 
-      {agents.length === 0 ? (
+      {/* Filter */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <FilterButton label="Active" active={!showHidden} onClick={() => setShowHidden(false)} count={agents.filter(a => !hidden.has(a.agentId.toString())).length} />
+        <FilterButton label="Hidden" active={showHidden} onClick={() => setShowHidden(true)} count={agents.filter(a => hidden.has(a.agentId.toString())).length} />
+      </div>
+
+      {filteredAgents.length === 0 ? (
         <div style={{ ...styles.card, textAlign: 'center' }}>
-          <p style={{ color: THEME.textMuted }}>No agents registered with this wallet.</p>
-          <Link to="/register-agent" style={{ color: THEME.accentBlue }}>Register a new Agent</Link>
+          <p style={{ color: THEME.textMuted }}>{showHidden ? 'No hidden agents.' : 'No active agents.'}</p>
+          {!showHidden && agents.length === 0 && (
+            <Link to="/register-agent" style={{ color: THEME.accentBlue }}>Register your first Agent</Link>
+          )}
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 16 }}>
@@ -205,9 +221,6 @@ export function ProviderDashboard() {
         </div>
       )}
 
-      <div style={{ marginTop: 24 }}>
-        <Link to="/register-agent" style={{ color: THEME.accentBlue, fontSize: 14 }}>+ Register another Agent</Link>
-      </div>
 
       {/* Get Started Guide */}
       <div style={{ marginTop: 32 }}>
@@ -260,6 +273,19 @@ function StepCard({ num, title, done, children }: { num: number; title: string; 
       </div>
       <div style={{ fontSize: 13, color: THEME.textPrimary, lineHeight: 1.6, paddingLeft: 36 }}>{children}</div>
     </div>
+  )
+}
+
+function FilterButton({ label, active, onClick, count }: { label: string; active: boolean; onClick: () => void; count: number }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '6px 14px', borderRadius: THEME.radiusButton, border: 'none', cursor: 'pointer',
+      fontSize: 13, fontWeight: active ? 600 : 400,
+      background: active ? THEME.btnPrimary : THEME.canvas,
+      color: active ? THEME.surface : THEME.textSecondary,
+    }}>
+      {label} ({count})
+    </button>
   )
 }
 

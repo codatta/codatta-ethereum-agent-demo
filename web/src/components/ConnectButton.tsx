@@ -10,7 +10,6 @@ export function ConnectButton() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
@@ -28,7 +27,12 @@ export function ConnectButton() {
   }
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* Address */}
+      <span style={{ fontSize: 13, color: THEME.textSecondary, fontFamily: 'monospace' }}>
+        {address?.slice(0, 6)}...{address?.slice(-4)}
+      </span>
+
       {/* Avatar */}
       <div
         onClick={() => setOpen(!open)}
@@ -45,25 +49,13 @@ export function ConnectButton() {
       {/* Dropdown */}
       {open && (
         <div style={{
-          position: 'absolute', right: 0, top: 44, width: 260,
+          position: 'absolute', right: 0, top: 44, width: 220,
           background: THEME.surface, borderRadius: THEME.radiusCard,
           boxShadow: '0 8px 30px rgba(0,0,0,0.12)', zIndex: 100,
           overflow: 'hidden',
         }}>
-          {/* Wallet info */}
-          <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #F3F4F6' }}>
-            <div style={{ fontSize: 12, color: THEME.textMuted, marginBottom: 4 }}>Wallet</div>
-            <div style={{ fontFamily: 'monospace', fontSize: 13, color: THEME.textPrimary, wordBreak: 'break-all' }}>
-              {address}
-            </div>
-          </div>
-
-          {/* Menu items */}
           <MenuItem href="/dashboard" label="My Agents" onClick={() => setOpen(false)} />
           <MenuItem href="/invites" label="Invites" onClick={() => setOpen(false)} />
-          <MenuItem href="/register-agent" label="+ New Agent" onClick={() => setOpen(false)} />
-
-          {/* Disconnect */}
           <div
             onClick={() => { disconnect(); setOpen(false); }}
             style={{ ...menuItemStyle, color: THEME.danger, borderTop: '1px solid #F3F4F6' }}
@@ -86,5 +78,5 @@ function MenuItem({ href, label, onClick }: { href: string; label: string; onCli
 
 const menuItemStyle: React.CSSProperties = {
   padding: '10px 16px', fontSize: 13, color: THEME.textPrimary,
-  cursor: 'pointer', transition: 'background 0.1s',
+  cursor: 'pointer',
 }
