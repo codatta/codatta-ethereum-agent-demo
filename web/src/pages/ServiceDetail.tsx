@@ -43,9 +43,10 @@ export function ServiceDetail() {
       setLoading(true)
       const repAbi = parseAbi(reputationRegistryAbi as unknown as string[])
 
-      // Filter agents matching this service type, exclude hidden
+      // Filter agents: matching service type, not hidden, must be active
       const matched = agents.filter(a => {
         if (hidden.has(a.agentId.toString())) return false
+        if (a.registrationFile?.active === false) return false
         const desc = (a.description || '').toLowerCase()
         if (type === 'annotation') {
           return desc.includes('annotation') || desc.includes('label') || desc.includes('detection')

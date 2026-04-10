@@ -5,3 +5,4 @@ broadcast/
 origin-docs/
 agent/provider-identity.json
 agent/agent-info.json
+agent/invite-service-data.json

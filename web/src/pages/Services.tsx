@@ -38,6 +38,7 @@ export function Services() {
     if (type === 'annotation') {
       return agents.filter(a => {
         if (hidden.has(a.agentId.toString())) return false
+        if (a.registrationFile?.active === false) return false
         const desc = (a.description || '').toLowerCase()
         return desc.includes('annotation') || desc.includes('label') || desc.includes('detection')
       }).length
