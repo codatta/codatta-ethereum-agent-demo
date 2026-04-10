@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import express from "express";
+import readline from "readline";
 import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
@@ -30,14 +31,81 @@ import * as log from "../shared/logger.js";
 
 log.setRole("provider");
 
-const wallet = getWallet("DEPLOYER_PRIVATE_KEY");
-const didRegistrar = new ethers.Contract(addresses.didRegistrar, DIDRegistrarABI, wallet);
-const didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, wallet);
-const identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, wallet);
-const validationReg = new ethers.Contract(addresses.validationRegistry, ValidationRegistryABI, wallet);
-const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, provider);
-
+const IDENTITY_FILE = path.join(import.meta.dirname, "../../provider-identity.json");
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
+
+// ── Wallet setup ────────────────────────────────────────────────
+
+async function getOrCreateWallet(): Promise<ethers.Wallet> {
+  const envKey = process.env.PROVIDER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY;
+  if (envKey) {
+    return new ethers.Wallet(envKey, provider);
+  }
+
+  // Check saved identity
+  if (fs.existsSync(IDENTITY_FILE)) {
+    const saved = JSON.parse(fs.readFileSync(IDENTITY_FILE, "utf-8"));
+    if (saved.privateKey) {
+      log.info("Using saved provider wallet");
+      return new ethers.Wallet(saved.privateKey, provider);
+    }
+  }
+
+  // Ask user
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise<string>((resolve) => {
+    rl.question("\n  No private key configured. Generate a new one? (y/n): ", resolve);
+  });
+  rl.close();
+
+  if (answer.trim().toLowerCase() !== "y" && answer.trim().toLowerCase() !== "yes") {
+    throw new Error("No private key. Set PROVIDER_PRIVATE_KEY in .env or allow generation.");
+  }
+
+  const newWallet = ethers.Wallet.createRandom().connect(provider);
+  log.info("Generated new wallet:", newWallet.address);
+  log.info("Fund this address with ETH to register on-chain.");
+
+  // Save for next time
+  const saved = fs.existsSync(IDENTITY_FILE) ? JSON.parse(fs.readFileSync(IDENTITY_FILE, "utf-8")) : {};
+  saved.privateKey = newWallet.privateKey;
+  fs.writeFileSync(IDENTITY_FILE, JSON.stringify(saved, null, 2));
+  log.info("Private key saved to provider-identity.json");
+
+  return newWallet;
+}
+
+// ── Identity persistence ────────────────────────────────────────
+
+interface SavedIdentity {
+  privateKey?: string;
+  agentId?: string;
+  codattaDid?: string;
+  chainId?: number;
+}
+
+function loadIdentity(): SavedIdentity | null {
+  try {
+    if (fs.existsSync(IDENTITY_FILE)) {
+      return JSON.parse(fs.readFileSync(IDENTITY_FILE, "utf-8"));
+    }
+  } catch {}
+  return null;
+}
+
+function saveIdentity(data: Partial<SavedIdentity>) {
+  const existing = loadIdentity() || {};
+  const merged = { ...existing, ...data };
+  fs.writeFileSync(IDENTITY_FILE, JSON.stringify(merged, null, 2));
+}
+
+// Late-init contracts (depend on wallet)
+let wallet: ethers.Wallet;
+let didRegistrar: ethers.Contract;
+let didRegistry: ethers.Contract;
+let identity: ethers.Contract;
+let validationReg: ethers.Contract;
+let reputation: ethers.Contract;
 const MCP_PORT = PROVIDER_PORT + 1;
 const A2A_PORT = PROVIDER_PORT + 2;
 
@@ -121,16 +189,13 @@ async function updateValidation(agentId: bigint) {
   }
 }
 
-async function main() {
-  const network = await provider.getNetwork();
-  log.header(`Provider Agent — Chain ${network.chainId}`);
-  log.info("Address:", wallet.address);
-
-  // ── Step 0: Start annotation backend ──────────────────────────
-  log.step("Starting annotation backend");
-  annotationServiceUrl = await startAnnotationService();
-
-  // ── Step 1: Register Codatta DID ──────────────────────────────
+async function registerIdentity(
+  network: ethers.Network,
+  serviceEndpointUrl: string,
+  mcpEndpointUrl: string,
+  a2aEndpointUrl: string,
+): Promise<{ agentId: bigint; codattaDid: bigint }> {
+  // ── Register Codatta DID ──────────────────────────────────────
   log.step("Registering Codatta DID");
 
   const didTx = await didRegistrar.register();
@@ -146,12 +211,8 @@ async function main() {
   const codattaDid: bigint = didEvent!.args.identifier;
   log.info("Codatta DID:", `did:codatta:${codattaDid.toString(16)}`);
 
-  // ── Step 2: Register in ERC-8004 ──────────────────────────────
+  // ── Register in ERC-8004 ──────────────────────────────────────
   log.step("Registering agent in ERC-8004");
-
-  const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
-  const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
-  const a2aEndpointUrl = `http://localhost:${A2A_PORT}`;
 
   const registrationFile = {
     type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
@@ -193,7 +254,7 @@ async function main() {
   const updatedURI = `data:application/json;base64,${Buffer.from(JSON.stringify(registrationFile)).toString("base64")}`;
   await (await identity.setAgentUri(agentId, updatedURI)).wait();
 
-  // ── Step 3: Link DID ↔ ERC-8004 ──────────────────────────────
+  // ── Link DID ↔ ERC-8004 ──────────────────────────────────────
   log.step("Linking DID ↔ ERC-8004");
 
   await (await identity.setMetadata(
@@ -215,6 +276,68 @@ async function main() {
   log.info("ERC-8004 → DID:", `did:codatta:${codattaDid.toString(16)}`);
   log.success("Dual identity established");
 
+  // Save identity for next startup
+  saveIdentity({
+    agentId: agentId.toString(),
+    codattaDid: codattaDid.toString(16),
+    chainId: Number(network.chainId),
+  });
+
+  return { agentId, codattaDid };
+}
+
+async function main() {
+  // ── Init wallet ───────────────────────────────────────────────
+  wallet = await getOrCreateWallet();
+
+  didRegistrar = new ethers.Contract(addresses.didRegistrar, DIDRegistrarABI, wallet);
+  didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, wallet);
+  identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, wallet);
+  validationReg = new ethers.Contract(addresses.validationRegistry, ValidationRegistryABI, wallet);
+  reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, provider);
+
+  const network = await provider.getNetwork();
+  log.header(`Provider Agent — Chain ${network.chainId}`);
+  log.info("Address:", wallet.address);
+
+  // ── Step 0: Start annotation backend ──────────────────────────
+  log.step("Starting annotation backend");
+  annotationServiceUrl = await startAnnotationService();
+
+  // ── Step 1: Check saved identity or register ──────────────────
+  const saved = loadIdentity();
+  let agentId: bigint;
+  let codattaDid: bigint;
+
+  const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
+  const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
+  const a2aEndpointUrl = `http://localhost:${A2A_PORT}`;
+
+  if (saved?.agentId && saved?.codattaDid && saved?.chainId === Number(network.chainId)) {
+    // ── Returning provider — skip registration ──────────────────
+    agentId = BigInt(saved.agentId);
+    codattaDid = BigInt(`0x${saved.codattaDid}`);
+
+    // Verify still valid on-chain
+    try {
+      const owner = await identity.ownerOf(agentId);
+      if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
+        throw new Error("Agent owner mismatch");
+      }
+      log.step("Identity loaded from file");
+      log.info("Agent ID:", agentId.toString());
+      log.info("Codatta DID:", `did:codatta:${codattaDid.toString(16)}`);
+      log.success("Identity verified on-chain");
+    } catch {
+      log.info("Saved identity invalid, re-registering...");
+      ({ agentId, codattaDid } = await registerIdentity(network, serviceEndpointUrl, mcpEndpointUrl, a2aEndpointUrl));
+    }
+  } else {
+    // ── First time — full registration ──────────────────────────
+    ({ agentId, codattaDid } = await registerIdentity(network, serviceEndpointUrl, mcpEndpointUrl, a2aEndpointUrl));
+  }
+
+  // Write agent info for client/query
   fs.writeFileSync(AGENT_INFO_FILE, JSON.stringify({
     agentId: agentId.toString(),
     did: `did:codatta:${codattaDid.toString(16)}`,
