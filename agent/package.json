@@ -7,6 +7,7 @@
     "start:provider": "tsx src/provider/index.ts",
     "start:client": "tsx src/client/index.ts",
     "query": "tsx src/query/index.ts",
+    "start:invite-service": "tsx src/invite-service/index.ts",
     "start:recruiter": "tsx src/recruiter/index.ts",
     "start:external": "tsx src/recruiter/external-agent.ts"
   },

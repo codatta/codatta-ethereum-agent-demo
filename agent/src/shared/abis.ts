@@ -2,6 +2,11 @@ export const DIDRegistrarABI = [
   "function register() external",
 ];
 
+export const InviteRegistrarABI = [
+  "function registerWithInvite(address inviter, uint256 nonce, bytes signature) external",
+  "event InviteRegistered(uint128 indexed identifier, address indexed owner, address indexed inviter, uint256 nonce)",
+];
+
 export const DIDRegistryABI = [
   "function addItemToAttribute(uint128 identifier, uint128 operator, string name, bytes value) external",
   "function getDidDocument(uint128 identifier) external view returns (uint128 id, address owner, uint128[] controller, tuple(string name, bytes value)[] kvAttributes, tuple(string name, tuple(bytes value, bool revoked)[] values)[] arrayAttributes)",

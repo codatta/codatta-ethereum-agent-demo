@@ -2,12 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 interface InviteRecord {
-  inviteCode: string
+  nonce: number
+  inviter: string
   clientAddress: string
   clientDid: string | null
-  freeQuota: number
-  usedQuota: number
-  remainingQuota: number
   claimed: boolean
   claimedAt: string | null
   createdAt: string
@@ -19,7 +17,7 @@ interface InviteData {
   invites: InviteRecord[]
 }
 
-const PROVIDER_URL = 'http://127.0.0.1:4021'
+const INVITE_SERVICE_URL = 'http://127.0.0.1:4060'
 
 export function Invites() {
   const [data, setData] = useState<InviteData | null>(null)
@@ -32,12 +30,12 @@ export function Invites() {
     async function fetchInvites() {
       try {
         setLoading(true)
-        const res = await fetch(`${PROVIDER_URL}/invites`)
+        const res = await fetch(`${INVITE_SERVICE_URL}/invites`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = await res.json()
         if (!cancelled) { setData(json); setError(null) }
       } catch (err: any) {
-        if (!cancelled) setError(`Cannot connect to Provider (${PROVIDER_URL}). Is it running?`)
+        if (!cancelled) setError(`Cannot connect to Invite Service (${INVITE_SERVICE_URL}). Is it running?`)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -82,18 +80,19 @@ export function Invites() {
         <table style={tableStyle}>
           <thead>
             <tr>
-              <th style={thStyle}>Invite Code</th>
-              <th style={thStyle}>Client Address</th>
+              <th style={thStyle}>Nonce</th>
+              <th style={thStyle}>Inviter</th>
+              <th style={thStyle}>Client</th>
               <th style={thStyle}>DID</th>
               <th style={thStyle}>Status</th>
-              <th style={thStyle}>Quota</th>
               <th style={thStyle}>Created</th>
             </tr>
           </thead>
           <tbody>
             {data.invites.map((inv, i) => (
               <tr key={i}>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12 }}>{inv.inviteCode}</td>
+                <td style={tdStyle}>{inv.nonce}</td>
+                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12 }}>{inv.inviter.slice(0, 10)}...</td>
                 <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12 }}>{inv.clientAddress.slice(0, 10)}...</td>
                 <td style={tdStyle}>
                   {inv.clientDid ? (
@@ -113,10 +112,6 @@ export function Invites() {
                     {inv.claimed ? 'Claimed' : 'Pending'}
                   </span>
                 </td>
-                <td style={{ ...tdStyle, fontSize: 13 }}>
-                  {inv.usedQuota}/{inv.freeQuota} used
-                  <span style={{ color: '#999', marginLeft: 4 }}>({inv.remainingQuota} left)</span>
-                </td>
                 <td style={{ ...tdStyle, fontSize: 12, color: '#999' }}>
                   {new Date(inv.createdAt).toLocaleTimeString()}
                 </td>
@@ -127,7 +122,7 @@ export function Invites() {
       )}
 
       <p style={{ fontSize: 12, color: '#999', marginTop: 16 }}>
-        Auto-refreshes every 5 seconds. Data from Provider at {PROVIDER_URL}/invites
+        Auto-refreshes every 5 seconds. Data from Invite Service at {INVITE_SERVICE_URL}/invites
       </p>
     </div>
   )

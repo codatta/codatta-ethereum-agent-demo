@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { provider, getWallet, addresses } from "../shared/config.js";
 import {
-  IdentityRegistryABI, ReputationRegistryABI, DIDRegistryABI, DIDRegistrarABI,
+  IdentityRegistryABI, ReputationRegistryABI, DIDRegistryABI, InviteRegistrarABI,
 } from "../shared/abis.js";
 import * as log from "../shared/logger.js";
 
@@ -15,7 +15,7 @@ log.setRole("client");
 const wallet = getWallet("CLIENT_PRIVATE_KEY");
 const identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, provider);
 const didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, provider);
-const didRegistrar = new ethers.Contract(addresses.didRegistrar, DIDRegistrarABI, wallet);
+const inviteRegistrar = new ethers.Contract(addresses.inviteRegistrar, InviteRegistrarABI, wallet);
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, wallet);
 
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
@@ -226,26 +226,35 @@ async function main() {
       const accepted = answer === "y" || answer === "yes";
 
       if (accepted) {
-        // ── Step 3b: Register DID + Claim invite ──────────────────
-        log.step("Registering Codatta DID");
+        // ── Step 3b: Register DID via InviteRegistrar (on-chain) ──
+        log.step("Registering Codatta DID with invite code (on-chain)");
+        log.info(`Inviter: ${inviteData.inviter}`);
+        log.info(`Nonce: ${inviteData.nonce}`);
 
-        const didTx = await didRegistrar.register();
-        const didReceipt = await didTx.wait();
-        const didEvent = didReceipt.logs
+        const regTx = await inviteRegistrar.registerWithInvite(
+          inviteData.inviter,
+          inviteData.nonce,
+          inviteData.signature
+        );
+        const regReceipt = await regTx.wait();
+
+        // Parse InviteRegistered event
+        const inviteEvent = regReceipt.logs
           .map((l: ethers.Log) => {
-            try { return didRegistry.interface.parseLog({ topics: [...l.topics], data: l.data }); }
+            try { return inviteRegistrar.interface.parseLog({ topics: [...l.topics], data: l.data }); }
             catch { return null; }
           })
-          .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
+          .find((e: ethers.LogDescription | null) => e?.name === "InviteRegistered");
 
-        clientDid = `did:codatta:${didEvent!.args.identifier.toString(16)}`;
+        clientDid = `did:codatta:${inviteEvent!.args.identifier.toString(16)}`;
         log.success(`Registered DID: ${clientDid}`);
+        log.info(`Invite attribution recorded on-chain (inviter: ${inviteData.inviter.slice(0, 10)}...)`);
       } else {
-        log.info("Declined DID registration. Proceeding without free quota.");
+        log.info("Declined DID registration. Proceeding without invite.");
       }
 
       // ── Step 4: Connect MCP and use annotation service ──────────
-      log.step(accepted ? "Claiming invite + requesting annotation" : "Requesting annotation (paid mode)");
+      log.step(accepted ? "Requesting annotation" : "Requesting annotation (paid mode)");
 
       const mcpClient = new Client({ name: "codatta-client", version: "1.0.0" });
       const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint));
@@ -253,17 +262,6 @@ async function main() {
 
       const { tools } = await mcpClient.listTools();
       log.info(`Discovered ${tools.length} tool(s): ${tools.map(t => t.name).join(", ")}`);
-
-      // Claim invite if registered
-      if (accepted && clientDid) {
-        const claimResult = await mcpClient.callTool({
-          name: "claim_invite",
-          arguments: { inviteCode: inviteData.inviteCode, clientDid },
-        });
-        const claimText = claimResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
-        const claimData = claimText ? JSON.parse(claimText.text) : {};
-        log.success(`Invite claimed! Free quota: ${claimData.freeQuota} images`);
-      }
 
       // ── Step 5: Annotate ──────────────────────────────────────────
       const images = [
@@ -273,11 +271,6 @@ async function main() {
       ];
 
       log.info(`Calling annotate: ${images.length} images, task=object-detection`);
-      if (accepted) {
-        log.info("(using free quota)");
-      } else {
-        log.info("(no free quota — x402 payment would be required in production)");
-      }
 
       const submitResult = await mcpClient.callTool({
         name: "annotate",
@@ -285,7 +278,6 @@ async function main() {
           images,
           task: "object-detection",
           clientAddress: wallet.address,
-          ...(clientDid ? { clientDid } : {}),
         },
       });
       const submitText = submitResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
@@ -338,7 +330,7 @@ async function main() {
       log.summary({
         "Agent ID": agentId.toString(),
         "Client DID": clientDid || "Not registered",
-        "Payment": accepted ? `Free quota (${images.length} images)` : "Paid (x402)",
+        "Invite": accepted ? "On-chain (InviteRegistrar)" : "Skipped",
         "Reputation Score": score.toString(),
         "Annotations": `${result.annotations.length} images`,
         "Protocol": "A2A (consult) → MCP (execute)",

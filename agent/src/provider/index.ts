@@ -20,7 +20,7 @@ import {
 import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
 import { startAnnotationService } from "./annotation-service.js";
-import { provider, getWallet, addresses, PROVIDER_PORT } from "../shared/config.js";
+import { provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL } from "../shared/config.js";
 import {
   DIDRegistrarABI, DIDRegistryABI,
   IdentityRegistryABI, ValidationRegistryABI, ReputationRegistryABI,
@@ -41,65 +41,22 @@ const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
 const MCP_PORT = PROVIDER_PORT + 1;
 const A2A_PORT = PROVIDER_PORT + 2;
 
-// ── Invite code + free quota ────────────────────────────────────
-const FREE_QUOTA = 10;
-const freeQuotaStore = new Map<string, number>(); // did → remaining free count
+// ── Invite Service integration ──────────────────────────────────
 
-interface InviteRecord {
-  inviteCode: string
-  clientAddress: string
-  clientDid: string | null
-  freeQuota: number
-  usedQuota: number
-  claimedAt: string | null
-  createdAt: string
-}
-const inviteRecords: InviteRecord[] = [];
-
-function generateInviteCode(providerAddress: string, clientAddress: string): string | null {
-  // One invite per client address
-  const existing = inviteRecords.find(r => r.clientAddress.toLowerCase() === clientAddress.toLowerCase());
-  if (existing) return null;
-
-  const payload = ethers.solidityPackedKeccak256(
-    ["address", "address", "uint256"],
-    [providerAddress, clientAddress, Math.floor(Date.now() / 1000)]
-  );
-  inviteRecords.push({
-    inviteCode: payload,
-    clientAddress,
-    clientDid: null,
-    freeQuota: FREE_QUOTA,
-    usedQuota: 0,
-    claimedAt: null,
-    createdAt: new Date().toISOString(),
-  });
-  return payload;
-}
-
-function grantFreeQuota(did: string, inviteCode?: string) {
-  const current = freeQuotaStore.get(did) || 0;
-  freeQuotaStore.set(did, current + FREE_QUOTA);
-  // Update invite record
-  if (inviteCode) {
-    const record = inviteRecords.find(r => r.inviteCode === inviteCode);
-    if (record) {
-      record.clientDid = did;
-      record.claimedAt = new Date().toISOString();
-    }
+async function requestInviteCode(inviter: string, clientAddress: string): Promise<{ nonce: number; signature: string; inviteRegistrar: string } | null> {
+  try {
+    const res = await fetch(`${INVITE_SERVICE_URL}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inviter, clientAddress }),
+    });
+    if (res.status === 409) return null; // already exists
+    if (!res.ok) return null;
+    return await res.json() as { nonce: number; signature: string; inviteRegistrar: string };
+  } catch {
+    log.info("Invite Service unavailable, skipping invite");
+    return null;
   }
-  log.info(`Free quota granted: ${did} → ${current + FREE_QUOTA} images`);
-}
-
-function consumeFreeQuota(did: string, count: number): boolean {
-  const remaining = freeQuotaStore.get(did) || 0;
-  if (remaining >= count) {
-    freeQuotaStore.set(did, remaining - count);
-    const record = inviteRecords.find(r => r.clientDid === did);
-    if (record) record.usedQuota += count;
-    return true;
-  }
-  return false;
 }
 
 // ── Task store (async annotation) ───────────────────────────────
@@ -275,30 +232,15 @@ async function main() {
       "annotate",
       "Submit images for annotation. This is an async operation — returns a taskId immediately. " +
       "Use get_task_status(taskId) to poll for results. Status transitions: working → completed/failed. " +
-      "Pass clientDid to use free quota (from claim_invite), otherwise x402 payment is required.",
+      "In production, x402 payment is required. Clients with a Codatta DID registered via invite may have free quota.",
       {
         images: z.array(z.string()).describe("Image URLs to annotate"),
         task: z.enum(["object-detection", "segmentation", "classification"]).describe("Annotation task type"),
         labels: z.array(z.string()).optional().describe("Label set, e.g. ['car', 'pedestrian', 'traffic-light']"),
         clientAddress: z.string().optional().describe("Client wallet address for feedbackAuth"),
-        clientDid: z.string().optional().describe("Client Codatta DID for free quota check"),
       },
-      async ({ images, task, clientAddress, clientDid }) => {
+      async ({ images, task, clientAddress }) => {
         log.event("MCP tool call", `annotate: ${images.length} images, task=${task}`);
-
-        // Check free quota
-        let usedFreeQuota = false;
-        if (clientDid) {
-          usedFreeQuota = consumeFreeQuota(clientDid, images.length);
-          if (usedFreeQuota) {
-            const remaining = freeQuotaStore.get(clientDid) || 0;
-            log.info(`Free quota used: ${images.length} images (remaining: ${remaining})`);
-          }
-        }
-        if (!usedFreeQuota) {
-          // In production: require x402 payment here
-          log.info("No free quota — payment required (skipped in demo)");
-        }
 
         const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const annotationTask: AnnotationTask = {
@@ -381,40 +323,8 @@ async function main() {
       }
     );
 
-    // Tool: claim_invite — claim an invite code to get free quota after DID registration
-    server.tool(
-      "claim_invite",
-      "Claim an invite code to receive free annotation credits. " +
-      "Prerequisites: 1) Get an invite code via A2A consultation, 2) Register a Codatta DID. " +
-      "After claiming, pass your clientDid to annotate to use free quota.",
-      {
-        inviteCode: z.string().describe("Invite code received from A2A consultation"),
-        clientDid: z.string().describe("Your registered Codatta DID (did:codatta:xxx)"),
-      },
-      async ({ inviteCode, clientDid }) => {
-        log.event("MCP tool call", `claim_invite: did=${clientDid}`);
-
-        // Check: invite code must exist and not already claimed
-        const record = inviteRecords.find(r => r.inviteCode === inviteCode);
-        if (!record) {
-          return { content: [{ type: "text" as const, text: JSON.stringify({ status: "error", message: "Invalid invite code." }) }] };
-        }
-        if (record.claimedAt) {
-          return { content: [{ type: "text" as const, text: JSON.stringify({ status: "error", message: "Invite code already claimed." }) }] };
-        }
-
-        grantFreeQuota(clientDid, inviteCode);
-        const remaining = freeQuotaStore.get(clientDid) || 0;
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({
-            status: "claimed",
-            did: clientDid,
-            freeQuota: remaining,
-            message: `Welcome! You have ${remaining} free annotation credits.`,
-          })}],
-        };
-      }
-    );
+    // Note: claim_invite removed — DID registration with invite now happens on-chain
+    // via InviteRegistrar.registerWithInvite(). No MCP tool needed.
 
     return server;
   }
@@ -527,47 +437,11 @@ async function main() {
         const dataPart = ctx.userMessage.parts?.find((p: any) => p.type === "data") as any;
         const clientAddress = dataPart?.data?.clientAddress || "";
 
-        // Check if this client already registered
-        const existingRecord = inviteRecords.find(r => r.clientAddress.toLowerCase() === clientAddress.toLowerCase());
-        if (existingRecord?.claimedAt && existingRecord.clientDid) {
-          const remaining = freeQuotaStore.get(existingRecord.clientDid) || 0;
-          eventBus.publish({
-            kind: "task",
-            id: ctx.taskId,
-            contextId: contextKey,
-            status: { state: "completed", timestamp: new Date().toISOString() },
-            history: [{
-              role: "agent",
-              messageId: `resp-${Date.now()}`,
-              parts: [
-                {
-                  type: "text",
-                  text: `Welcome back! You're already registered.\n\n` +
-                    `• DID: ${existingRecord.clientDid}\n` +
-                    `• Free quota remaining: ${remaining} images\n\n` +
-                    `You can use the \`annotate\` MCP tool directly with your DID.`,
-                },
-                {
-                  type: "data",
-                  data: {
-                    action: "returning-user",
-                    clientDid: existingRecord.clientDid,
-                    remainingQuota: remaining,
-                    mcpEndpoint: mcpEndpointUrl,
-                  },
-                },
-              ],
-            }],
-          } as any);
-          eventBus.finished();
-          return;
-        }
+        // Request invite code from Invite Service
+        const invite = await requestInviteCode(wallet.address, clientAddress);
 
-        const inviteCode = generateInviteCode(wallet.address, clientAddress);
-
-        if (!inviteCode) {
-          // Invited but not yet claimed
-          const pending = inviteRecords.find(r => r.clientAddress.toLowerCase() === clientAddress.toLowerCase());
+        if (!invite) {
+          // Already has an invite or service unavailable
           eventBus.publish({
             kind: "task",
             id: ctx.taskId,
@@ -578,8 +452,8 @@ async function main() {
               messageId: `resp-${Date.now()}`,
               parts: [{
                 type: "text",
-                text: `You already have an invite code (${pending?.inviteCode.slice(0, 18)}...). ` +
-                  "Please register a Codatta DID and use `claim_invite` to activate it.",
+                text: "An invite has already been issued for this address. " +
+                  "Use your existing invite to register a Codatta DID via the InviteRegistrar contract.",
               }],
             }],
           } as any);
@@ -599,19 +473,19 @@ async function main() {
             parts: [
               {
                 type: "text",
-                text: "Here's your invite code! Steps to get free annotations:\n\n" +
-                  "1. Register a Codatta DID (free, on-chain)\n" +
-                  "2. Call the `claim_invite` MCP tool with your invite code and DID\n" +
-                  "3. You'll receive 10 free annotation credits\n\n" +
-                  "After that, use the `annotate` tool with your DID to start annotating!",
+                text: "Here's your invite code! To register and get free annotations:\n\n" +
+                  "Call InviteRegistrar.registerWithInvite(inviter, nonce, signature) on-chain.\n" +
+                  "This will register your Codatta DID and record the invite attribution.\n\n" +
+                  "After registration, use the `annotate` MCP tool to start annotating!",
               },
               {
                 type: "data",
                 data: {
                   action: "invite",
-                  inviteCode,
-                  didRegistrarContract: addresses.didRegistrar,
-                  freeQuota: FREE_QUOTA,
+                  inviter: wallet.address,
+                  nonce: invite.nonce,
+                  signature: invite.signature,
+                  inviteRegistrar: invite.inviteRegistrar,
                   mcpEndpoint: mcpEndpointUrl,
                 },
               },
@@ -709,25 +583,6 @@ async function main() {
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", agentId: agentId.toString(), active: true });
-  });
-
-  // Invite records for Web Dashboard
-  app.get("/invites", (_req, res) => {
-    res.json({
-      total: inviteRecords.length,
-      claimed: inviteRecords.filter(r => r.claimedAt).length,
-      invites: inviteRecords.map(r => ({
-        inviteCode: r.inviteCode.slice(0, 18) + "...",
-        clientAddress: r.clientAddress,
-        clientDid: r.clientDid,
-        freeQuota: r.freeQuota,
-        usedQuota: r.usedQuota,
-        remainingQuota: r.clientDid ? (freeQuotaStore.get(r.clientDid) || 0) : r.freeQuota,
-        claimed: !!r.claimedAt,
-        claimedAt: r.claimedAt,
-        createdAt: r.createdAt,
-      })),
-    });
   });
 
   app.listen(PROVIDER_PORT, () => {
