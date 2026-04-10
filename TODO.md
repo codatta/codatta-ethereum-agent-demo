@@ -9,18 +9,22 @@
 - [x] ERC-8004 标准注册文件（registration-v1）
 - [x] MCP 标注服务（annotate、get_task_status、claim_invite）
 - [x] A2A 售前咨询 + 邀请码发放
-- [x] Client 注册 DID + 免费额度
+- [x] Client 注册 DID + 免费额度（含接受/拒绝确认）
+- [x] 返回用户识别（已注册用户跳过邀请流程）
 - [x] Mock 标注后端（独立 HTTP API）
 - [x] DID 关联验证（Client 端）
 - [x] feedbackAuth + Reputation 评价
 - [x] Validation 更新
 - [x] 查询工具（npm run query）
+- [x] InviteRegistrar 合约（链上邀请码签名验证）
+- [x] Web Dashboard — 服务目录、Agent 列表、Agent 详情、Provider Dashboard、Invites
 
 ### 待实现
 
+- [ ] **Invite Service** — 独立服务，生成签名邀请码，监听 InviteRegistered 事件记录归因
+- [ ] **Provider/Client 对接 InviteRegistrar** — 替换内存邀请码方案，改为链上验证
 - [ ] **x402 真实支付** — 部署到 Base Sepolia，接入公共 facilitator，Client 需测试 USDC
 - [ ] **对接 Codatta 真实标注后端** — 替换 annotation-service.ts 的 mock，指向 Codatta Data Production System API
-- [ ] **前端页面** — React + ethers.js，展示 Agent 身份、信誉、Validation 记录
 
 ## Stage 2：生态聚合
 
@@ -39,6 +43,14 @@
 - [ ] **CodattaFrontierRegistry 合约** — Frontier 注册、费率配置
 - [ ] **激励机制** — 信誉联动、等级加成
 - [ ] **ERC-8021 App Code** — 多平台参与后启用引流归因
+
+## Blockers（来自 design/demo-flow-and-blockers.md）
+
+- [ ] **P0: 无钱包 Agent 的注册和支付** — 钱包托管或代理机制
+- [ ] **P0: Codatta Agent SDK / CLI** — Agent 安装后自动具备服务能力，无需 owner 开发代码
+- [ ] **P1: Owner 确认机制** — 招募操作需 owner 在 Web 确认
+- [ ] **P1: DID 签名验证** — Agent 证明 DID 持有权
+- [ ] **P1: 服务选择和能力要求定义** — Agent 选择提供哪些服务，需要什么能力
 
 ## 代码整理
 
