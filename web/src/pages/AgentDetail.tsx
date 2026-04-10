@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAgentDetail } from '../hooks/useAgentDetail'
 import { THEME, styles } from '../lib/theme'
 
 export function AgentDetail() {
   const { agentId } = useParams()
+  const navigate = useNavigate()
   const { detail, loading } = useAgentDetail(agentId)
   const [showTechnical, setShowTechnical] = useState(false)
 
@@ -20,12 +21,15 @@ export function AgentDetail() {
 
   return (
     <div>
-      <Link to="/" style={{ fontSize: 13, color: THEME.textSecondary }}>&larr; Back</Link>
+      <span onClick={() => navigate(-1)} style={{ fontSize: 13, color: THEME.textSecondary, cursor: 'pointer' }}>&larr; Back</span>
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginTop: 12 }}>
         <div>
           <h2 style={{ margin: '0 0 4px' }}>{reg?.name || `Agent ${agentId?.slice(0, 12)}...`}</h2>
+          <p style={{ margin: '0 0 6px', ...styles.mono, fontSize: 12, color: THEME.textMuted, userSelect: 'all' }}>
+            Agent ID: {detail.agentId.toString()}
+          </p>
           <p style={{ margin: 0, fontSize: 14, color: THEME.textSecondary, lineHeight: 1.6 }}>{reg?.description || 'No description'}</p>
         </div>
         <div style={{ textAlign: 'center', flexShrink: 0, marginLeft: 24 }}>

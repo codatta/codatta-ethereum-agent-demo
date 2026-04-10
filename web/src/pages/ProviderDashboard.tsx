@@ -168,8 +168,15 @@ export function ProviderDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                   <div>
                     <h3 style={{ margin: '0 0 4px' }}>{reg?.name || 'Unnamed Agent'}</h3>
-                    <p style={{ margin: 0, ...styles.mono, fontSize: 12, color: THEME.textMuted }}>
-                      ID: {agent.agentId.toString().slice(0, 24)}...
+                    <p style={{ margin: 0, ...styles.mono, fontSize: 12, color: THEME.textMuted, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ userSelect: 'all' }}>ID: {agent.agentId.toString()}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(agent.agentId.toString()) }}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, padding: 0 }}
+                        title="Copy Agent ID"
+                      >
+                        Copy
+                      </button>
                     </p>
                   </div>
                   {hidden.has(agent.agentId.toString()) ? (
