@@ -396,6 +396,21 @@ async function main() {
             annotationTask.annotations = annotations;
             annotationTask.feedbackAuth = feedbackAuth;
             annotationTask.completedAt = Date.now();
+
+            // Report to Invite Service
+            try {
+              const dur = ((annotationTask.completedAt - annotationTask.createdAt) / 1000).toFixed(1);
+              await fetch(`${INVITE_SERVICE_URL}/service-history`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  agentId: agentId.toString(),
+                  clientAddress: clientAddress || "",
+                  task, imageCount: images.length,
+                  duration: `${dur}s`, status: "completed",
+                }),
+              });
+            } catch {}
           } catch {
             annotationTask.status = "failed";
           }
@@ -719,6 +734,20 @@ async function main() {
           signerWallet: wallet,
         });
       }
+    } catch {}
+
+    // Report to Invite Service
+    try {
+      await fetch(`${INVITE_SERVICE_URL}/service-history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: agentId.toString(),
+          clientAddress: clientAddress || req.ip,
+          task, imageCount: images?.length || 0,
+          duration: null, status: "completed",
+        }),
+      });
     } catch {}
 
     res.json({

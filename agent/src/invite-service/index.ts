@@ -52,11 +52,23 @@ interface AgentRegistration {
   verifiedAt: string | null;
 }
 
+interface ServiceRecord {
+  id: string;
+  agentId: string;
+  clientAddress: string;
+  task: string;
+  imageCount: number;
+  duration: string | null;
+  status: "completed" | "failed";
+  timestamp: string;
+}
+
 interface StoreData {
   nonceCounter: number;
-  invites: Record<string, InviteRecord>; // nonce → record
+  invites: Record<string, InviteRecord>;
   hiddenAgents: string[];
-  agentRegistrations: Record<string, AgentRegistration>; // agentId → status
+  agentRegistrations: Record<string, AgentRegistration>;
+  serviceHistory: ServiceRecord[];
 }
 
 let store: StoreData = {
@@ -64,6 +76,7 @@ let store: StoreData = {
   invites: {},
   hiddenAgents: [],
   agentRegistrations: {},
+  serviceHistory: [],
 };
 
 function loadStore() {
@@ -348,6 +361,46 @@ async function main() {
       r => r.owner.toLowerCase() === owner
     );
     res.json({ registrations: regs });
+  });
+
+  // ── Service history ──────────────────────────────────────────
+
+  // Provider reports a completed service call
+  app.post("/service-history", (req, res) => {
+    const { agentId, clientAddress, task, imageCount, duration, status } = req.body;
+    const record: ServiceRecord = {
+      id: `svc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      agentId: agentId || "",
+      clientAddress: clientAddress || "",
+      task: task || "unknown",
+      imageCount: imageCount || 0,
+      duration: duration || null,
+      status: status || "completed",
+      timestamp: new Date().toISOString(),
+    };
+    store.serviceHistory.push(record);
+    saveStore();
+    log.info(`Service recorded: ${record.id} agent=${agentId} images=${imageCount}`);
+    res.json(record);
+  });
+
+  // Get service history for an agent
+  app.get("/service-history/:agentId", (req, res) => {
+    const records = store.serviceHistory.filter(r => r.agentId === req.params.agentId);
+    res.json({
+      total: records.length,
+      totalImages: records.reduce((sum, r) => sum + r.imageCount, 0),
+      records: records.slice(-50).reverse(), // last 50, newest first
+    });
+  });
+
+  // Get all service history (for dashboard overview)
+  app.get("/service-history", (_req, res) => {
+    res.json({
+      total: store.serviceHistory.length,
+      totalImages: store.serviceHistory.reduce((sum, r) => sum + r.imageCount, 0),
+      records: store.serviceHistory.slice(-50).reverse(),
+    });
   });
 
   // ── Health ──────────────────────────────────────────────────
