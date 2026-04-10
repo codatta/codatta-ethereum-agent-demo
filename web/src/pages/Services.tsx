@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useAgentList } from '../hooks/useAgentList'
+import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { THEME, styles } from '../lib/theme'
 
 const SERVICE_CATALOG = [
@@ -39,10 +40,12 @@ const SERVICE_CATALOG = [
 
 export function Services() {
   const { agents } = useAgentList()
+  const { hidden } = useHiddenAgents()
 
   function countAgents(type: string): number {
     if (type === 'annotation') {
       return agents.filter(a => {
+        if (hidden.has(a.agentId.toString())) return false
         const desc = (a.description || '').toLowerCase()
         return desc.includes('annotation') || desc.includes('label') || desc.includes('detection')
       }).length
