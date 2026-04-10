@@ -108,7 +108,7 @@ export function ProviderDashboard() {
   if (!isConnected) {
     return (
       <div>
-        <h2>Provider Dashboard</h2>
+        <h2>Provider</h2>
         <p style={{ color: THEME.accentOrange }}>Connect your wallet to view your agents.</p>
       </div>
     )
@@ -152,7 +152,7 @@ export function ProviderDashboard() {
       {filteredAgents.length === 0 ? (
         <div style={{ ...styles.card, textAlign: 'center' }}>
           <p style={{ color: THEME.textMuted }}>
-            {filter === 'hidden' ? 'No hidden agents.' : filter === 'visible' ? 'No visible agents.' : 'No agents registered.'}
+            {filter === 'hidden' ? 'No hidden agents.' : filter === 'visible' ? 'No visible agents.' : 'No agents registered yet.'}
           </p>
           {agents.length === 0 && (
             <Link to="/register-agent" style={{ color: THEME.accentBlue }}>Register your first Agent</Link>

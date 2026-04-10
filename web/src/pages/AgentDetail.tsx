@@ -8,8 +8,8 @@ export function AgentDetail() {
   const { detail, loading } = useAgentDetail(agentId)
   const [showTechnical, setShowTechnical] = useState(false)
 
-  if (loading) return <p>Loading agent...</p>
-  if (!detail) return <p>Agent not found</p>
+  if (loading) return <p>Loading...</p>
+  if (!detail) return <p>Not found</p>
 
   const reg = detail.registrationFile
   const services = reg?.services || []
@@ -61,7 +61,7 @@ export function AgentDetail() {
           <div>
             <strong style={{ fontSize: 13 }}>A2A (Consultation)</strong>
             <p style={{ margin: '4px 0', fontSize: 13, color: THEME.textSecondary }}>
-              Chat with the agent to ask about capabilities, pricing, and get an invite code.
+              Chat with the provider to ask about capabilities, pricing, and get an invite code.
             </p>
             <code style={{ ...styles.code, background: THEME.canvas, color: THEME.textPrimary }}>{a2aEndpoint}</code>
           </div>

@@ -122,7 +122,7 @@ export function ServiceDetail() {
           ) : rankedAgents.length === 0 ? (
             <div style={{ ...styles.card, textAlign: 'center' }}>
               <p style={{ color: THEME.textMuted }}>No providers available for this service.</p>
-              <p style={{ color: THEME.textMuted, fontSize: 13 }}>No providers have registered for this service yet.</p>
+              <p style={{ color: THEME.textMuted, fontSize: 13 }}>No providers available yet.</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: 12 }}>
@@ -212,7 +212,7 @@ function AnnotationGuide() {
 
       <div style={{ display: 'grid', gap: 16 }}>
         <GuideSection title="Quick Start (MCP)">
-          <p>Connect to the agent's MCP endpoint and call the <code>annotate</code> tool directly:</p>
+          <p>Connect to the provider's MCP endpoint and call the <code>annotate</code> tool directly:</p>
           <Code>{`const client = new Client({ name: "my-client", version: "1.0.0" });
 await client.connect(new StreamableHTTPClientTransport(new URL(mcpEndpoint)));
 
@@ -240,7 +240,7 @@ const status = await client.callTool({
 
         <GuideSection title="Full Flow (A2A + Free Quota)">
           <ol style={{ paddingLeft: 20, fontSize: 13, lineHeight: 2 }}>
-            <li><strong>A2A Consultation</strong> — Chat with the agent to learn about capabilities and pricing</li>
+            <li><strong>A2A Consultation</strong> — Chat with the provider to learn about capabilities and pricing</li>
             <li><strong>Get Invite Code</strong> — Request an invite code during consultation</li>
             <li><strong>Register Codatta DID</strong> — Free on-chain identity registration</li>
             <li><strong>Annotate</strong> — Call <code>annotate</code> MCP tool</li>
@@ -248,9 +248,9 @@ const status = await client.callTool({
           </ol>
         </GuideSection>
 
-        <GuideSection title="Download Agent Script">
+        <GuideSection title="Download Client Script">
           <p>
-            For Agent-to-Agent integration, download and run the client script.
+            For agent integration, download and run the client script.
             It walks through the complete flow: A2A consultation, DID registration, MCP annotation, and reputation feedback.
           </p>
           <Code>{`# Clone the repository
@@ -264,7 +264,7 @@ npm install
 cp .env.example .env
 ./sync-env.sh
 
-# Run the client agent
+# Run the client
 npm run start:client`}</Code>
         </GuideSection>
 
@@ -382,7 +382,7 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
 
       {!mcpEndpoint ? (
         <div style={styles.card}>
-          <p style={{ color: THEME.textMuted }}>No provider available. Register one first.</p>
+          <p style={{ color: THEME.textMuted }}>No provider available yet.</p>
         </div>
       ) : (
         <>

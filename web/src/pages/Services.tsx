@@ -58,7 +58,7 @@ export function Services() {
       <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Codatta Data Services</h2>
       <p style={{ color: THEME.textSecondary, marginBottom: 24 }}>
         AI-powered data services built on the Codatta data production ecosystem.
-        Browse services, discover agents, and integrate via MCP protocol.
+        Browse services, discover providers, and integrate via MCP protocol.
       </p>
 
       <div style={{ display: 'grid', gap: 16 }}>

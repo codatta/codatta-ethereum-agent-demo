@@ -82,8 +82,8 @@ export function RegisterAgent() {
   if (!isConnected) {
     return (
       <div>
-        <h2>Register Agent</h2>
-        <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>Connect your wallet to register as a data service provider.</p>
+        <h2>New Agent</h2>
+        <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>Connect your wallet to create a new agent.</p>
         <button onClick={() => connect({ connector: injected() })} style={styles.btnPrimary}>
           Connect Wallet
         </button>
@@ -95,7 +95,7 @@ export function RegisterAgent() {
   if (step === 'service') {
     return (
       <div>
-        <h2>Register Agent</h2>
+        <h2>New Agent</h2>
         <StepIndicator current="service" />
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>Choose the type of service your Agent will provide.</p>
 
@@ -138,7 +138,7 @@ export function RegisterAgent() {
   if (step === 'did') {
     return (
       <div>
-        <h2>Register Agent</h2>
+        <h2>New Agent</h2>
         <StepIndicator current="did" />
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
           Your Agent needs a Codatta DID. {detectedDid ? 'We found an existing DID for your wallet.' : 'If you already have one, enter it below.'}
@@ -230,10 +230,10 @@ export function RegisterAgent() {
   if (step === 'agent') {
     return (
       <div>
-        <h2>Register Agent</h2>
+        <h2>New Agent</h2>
         <StepIndicator current="agent" />
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
-          Register your Agent on ERC-8004 and link it to your DID.
+          Register your agent on ERC-8004 and link it to your DID.
         </p>
 
         <div style={{ ...styles.card, marginBottom: 12 }}>
@@ -341,7 +341,7 @@ export function RegisterAgent() {
 
     return (
       <div>
-        <h2>Register Agent</h2>
+        <h2>New Agent</h2>
         <StepIndicator current="verify" />
 
         <div style={{ ...styles.card, marginBottom: 16 }}>
@@ -491,7 +491,7 @@ export function RegisterAgent() {
   // ── Done ────────────────────────────────────────────────────
   return (
     <div>
-      <h2>Agent Registered!</h2>
+      <h2>Agent Created!</h2>
       <div style={{ ...styles.card, background: 'rgba(34,197,94,0.06)' }}>
         <p><strong>Agent ID:</strong> <span style={styles.mono}>{agentId}</span></p>
         <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>did:codatta:{didHex}</Link></p>

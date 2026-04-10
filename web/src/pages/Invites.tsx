@@ -75,7 +75,7 @@ export function Invites() {
       {/* Table */}
       {data.invites.length === 0 ? (
         <p style={{ color: THEME.textMuted }}>
-          No invites yet. Run the Client agent to trigger A2A consultation and generate invite codes.
+          No invites yet. Start a client to trigger A2A consultation and generate invite codes.
         </p>
       ) : (
         <div style={styles.section}>
