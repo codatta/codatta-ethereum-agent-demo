@@ -244,6 +244,10 @@ async function main() {
   log.step("Starting annotation backend");
   annotationServiceUrl = await startAnnotationService();
 
+  const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
+  const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
+  const a2aEndpointUrl = `http://localhost:${A2A_PORT}`;
+
   // ── Step 1: Load or input identity ─────────────────────────────
   const saved = loadIdentity();
   let agentId: bigint;
