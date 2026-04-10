@@ -273,7 +273,28 @@ async function main() {
         body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
       });
 
-      const toolsData = await toolsRes.json() as any;
+      // Response may be JSON or SSE stream — parse accordingly
+      const contentType = toolsRes.headers.get("content-type") || "";
+      let toolsData: any;
+
+      if (contentType.includes("text/event-stream")) {
+        // Parse SSE: extract JSON from "data: {...}" lines
+        const text = await toolsRes.text();
+        const dataLines = text.split("\n").filter(l => l.startsWith("data: "));
+        for (const line of dataLines) {
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            if (parsed.result?.tools) { toolsData = parsed; break; }
+          } catch {}
+        }
+        if (!toolsData) {
+          res.json({ status: "fail", error: "Could not parse tools from SSE response" });
+          return;
+        }
+      } else {
+        toolsData = await toolsRes.json();
+      }
+
       const tools = toolsData.result?.tools || [];
       const toolNames = tools.map((t: any) => t.name);
 
