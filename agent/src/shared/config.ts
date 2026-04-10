@@ -5,7 +5,7 @@ const network = process.env.NETWORK || "local";
 
 const rpcUrl =
   network === "local"
-    ? process.env.LOCAL_RPC_URL || "http://127.0.0.1:8545"
+    ? process.env.LOCAL_RPC_URL || "http://127.0.0.1:8086"
     : process.env.SEPOLIA_RPC_URL!;
 
 export const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
