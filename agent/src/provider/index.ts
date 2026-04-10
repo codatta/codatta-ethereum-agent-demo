@@ -118,7 +118,6 @@ async function requestInviteCode(inviter: string, clientAddress: string): Promis
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ inviter, clientAddress }),
     });
-    if (res.status === 409) return null; // already exists
     if (!res.ok) return null;
     return await res.json() as { nonce: number; signature: string; inviteRegistrar: string };
   } catch {

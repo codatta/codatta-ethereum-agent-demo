@@ -46,11 +46,11 @@ async function generateInviteCode(inviter: string, clientAddress: string): Promi
   nonce: number;
   signature: string;
 } | null> {
-  // One invite per client address per inviter
+  // Return existing invite if already generated
   for (const record of inviteStore.values()) {
     if (record.inviter.toLowerCase() === inviter.toLowerCase() &&
         record.clientAddress.toLowerCase() === clientAddress.toLowerCase()) {
-      return null;
+      return { nonce: record.nonce, signature: record.signature };
     }
   }
 
@@ -137,7 +137,7 @@ async function main() {
 
     const result = await generateInviteCode(inviter, clientAddress);
     if (!result) {
-      res.status(409).json({ error: "Invite already exists for this client address" });
+      res.status(500).json({ error: "Failed to generate invite code" });
       return;
     }
 
