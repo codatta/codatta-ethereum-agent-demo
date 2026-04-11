@@ -85,7 +85,7 @@ cd ../web
 # Write web .env
 cat > .env << EOF
 VITE_INVITE_SERVICE_URL=http://${SERVER_IP}/api
-VITE_RPC_URL=http://${SERVER_IP}:8086
+VITE_RPC_URL=http://${SERVER_IP}/rpc
 VITE_CHAIN_ID=31337
 VITE_CHAIN_NAME=Codatta Testnet
 VITE_DEFAULT_PORT_WEB=4021
@@ -116,6 +116,13 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
+
+    location /rpc {
+        proxy_pass http://127.0.0.1:8086;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Content-Type "application/json";
+    }
 }
 NGINX
 
@@ -130,12 +137,12 @@ echo "  ✅ Deployment Complete!"
 echo "============================================"
 echo ""
 echo "  Web Dashboard:    http://${SERVER_IP}"
-echo "  Invite Service:   http://${SERVER_IP}:4060"
-echo "  Anvil RPC:        http://${SERVER_IP}:8086"
+echo "  Invite Service:   http://${SERVER_IP}/api"
+echo "  Anvil RPC:        http://${SERVER_IP}/rpc"
 echo ""
 echo "  MetaMask Setup:"
 echo "    Network Name: Codatta Testnet"
-echo "    RPC URL:      http://${SERVER_IP}:8086"
+echo "    RPC URL:      http://${SERVER_IP}/rpc"
 echo "    Chain ID:     31337"
 echo "    Symbol:       ETH"
 echo ""
