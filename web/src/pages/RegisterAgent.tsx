@@ -39,12 +39,11 @@ export function RegisterAgent() {
   function deriveEndpoints(base: string) {
     setBaseUrl(base)
     try {
-      const url = new URL(base)
-      const port = parseInt(url.port) || 4021
+      const url = new URL(base.includes('://') ? base : `http://${base}`)
       const host = `${url.protocol}//${url.hostname}`
-      setWebUrl(`${host}:${port}`)
-      setMcpUrl(`${host}:${port + 1}/mcp`)
-      setA2aUrl(`${host}:${port + 2}/.well-known/agent-card.json`)
+      setWebUrl(`${host}:4021`)
+      setMcpUrl(`${host}:4022/mcp`)
+      setA2aUrl(`${host}:4023/.well-known/agent-card.json`)
     } catch {
       setWebUrl('')
       setMcpUrl('')
@@ -388,7 +387,7 @@ export function RegisterAgent() {
           <label>
             <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Base URL</span>
             <input
-              placeholder="http://your-server-ip:4021"
+              placeholder="http://your-server-ip"
               value={baseUrl}
               onChange={e => deriveEndpoints(e.target.value)}
               style={styles.input}
