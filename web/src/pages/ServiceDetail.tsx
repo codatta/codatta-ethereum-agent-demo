@@ -283,18 +283,31 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
   const [status, setStatus] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle')
   const [result, setResult] = useState<any>(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [logs, setLogs] = useState<string[]>([])
 
   const topAgent = agents[0]
   const mcpEndpoint = topAgent?.services.find(s => s.name === 'MCP')?.endpoint
+
+  function addLog(msg: string) {
+    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
+  }
 
   async function handleRun() {
     if (!mcpEndpoint) { setErrorMsg('No provider available'); return }
     setStatus('submitting')
     setResult(null)
     setErrorMsg('')
+    setLogs([])
 
     const images = imageUrls.split('\n').map(u => u.trim()).filter(Boolean)
     if (images.length === 0) { setErrorMsg('Enter at least one image URL'); setStatus('idle'); return }
+
+    addLog(`Provider: ${topAgent?.name}`)
+    addLog(`MCP endpoint: ${mcpEndpoint}`)
+    addLog(`Task: ${task}`)
+    addLog(`Images: ${images.length}`)
+    addLog('---')
+    addLog('Sending request to Invite Service proxy...')
 
     try {
       const res = await fetch('http://127.0.0.1:4060/try-annotate', {
@@ -305,9 +318,20 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
       if (!res.ok) throw new Error(`Service unavailable: HTTP ${res.status}`)
       const data = await res.json() as any
       if (data.error) throw new Error(data.error)
+
+      addLog(`Status: ${data.status}`)
+      addLog(`Annotations: ${data.annotations?.length || 0} images`)
+      data.annotations?.forEach((ann: any) => {
+        const labels = ann.labels?.map((l: any) => `${l.class}(${(l.confidence * 100).toFixed(0)}%)`).join(', ')
+        addLog(`  ${ann.image} → ${labels}`)
+      })
+      addLog('---')
+      addLog('✅ Done')
+
       setResult(data)
       setStatus('done')
     } catch (err: any) {
+      addLog(`❌ Error: ${err.message}`)
       setErrorMsg(err.message)
       setStatus('error')
     }
@@ -316,7 +340,7 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
   return (
     <div>
       <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>
-        Try the annotation service directly from your browser. This calls the MCP endpoint of the top-ranked provider.
+        Try the annotation service directly from your browser.
       </p>
 
       {!mcpEndpoint ? (
@@ -324,65 +348,88 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
           <p style={{ color: THEME.textMuted }}>No provider available yet.</p>
         </div>
       ) : (
-        <>
-          <div style={{ ...styles.card, marginBottom: 16 }}>
-            <p style={{ margin: 0, fontSize: 12, color: THEME.textMuted }}>
-              Provider: <strong style={{ color: THEME.textPrimary }}>{topAgent?.name}</strong>
-            </p>
-          </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {/* Left: Input */}
+          <div>
+            <div style={{ ...styles.card, marginBottom: 12 }}>
+              <p style={{ margin: 0, fontSize: 12, color: THEME.textMuted }}>
+                Provider: <strong style={{ color: THEME.textPrimary }}>{topAgent?.name}</strong>
+              </p>
+            </div>
 
-          <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
-            <label>
-              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Image URLs (one per line)</span>
-              <textarea
-                value={imageUrls}
-                onChange={e => setImageUrls(e.target.value)}
-                style={{ ...styles.input, height: 80, resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
-                disabled={status !== 'idle' && status !== 'done' && status !== 'error'}
-              />
-            </label>
-            <label>
-              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Task Type</span>
-              <select value={task} onChange={e => setTask(e.target.value)} style={styles.input}>
-                <option value="object-detection">Object Detection</option>
-                <option value="segmentation">Segmentation</option>
-                <option value="classification">Classification</option>
-              </select>
-            </label>
-            <button
-              onClick={handleRun}
-              disabled={status === 'submitting'}
-              style={{ ...styles.btnPrimary, opacity: status === 'submitting' ? 0.6 : 1 }}
-            >
-              {status === 'submitting' ? 'Annotating...' : 'Run Annotation'}
-            </button>
-          </div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <label>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Image URLs (one per line)</span>
+                <textarea
+                  value={imageUrls}
+                  onChange={e => setImageUrls(e.target.value)}
+                  style={{ ...styles.input, height: 100, resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
+                  disabled={status === 'submitting'}
+                />
+              </label>
+              <label>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Task Type</span>
+                <select value={task} onChange={e => setTask(e.target.value)} style={styles.input}>
+                  <option value="object-detection">Object Detection</option>
+                  <option value="segmentation">Segmentation</option>
+                  <option value="classification">Classification</option>
+                </select>
+              </label>
+              <button
+                onClick={handleRun}
+                disabled={status === 'submitting'}
+                style={{ ...styles.btnPrimary, opacity: status === 'submitting' ? 0.6 : 1 }}
+              >
+                {status === 'submitting' ? 'Annotating...' : 'Run Annotation'}
+              </button>
+            </div>
 
-          {/* Results */}
-          {result && (
-            <div style={{ marginTop: 16 }}>
-              <h4>Annotation Results</h4>
-              {result.annotations?.map((ann: any, i: number) => (
-                <div key={i} style={{ ...styles.card, marginTop: 8 }}>
-                  <p style={{ margin: 0, ...styles.mono, color: THEME.textSecondary }}>{ann.image}</p>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                    {ann.labels?.map((label: any, j: number) => (
-                      <span key={j} style={styles.badge(THEME.accentBlue)}>
-                        {label.class} ({(label.confidence * 100).toFixed(0)}%)
-                      </span>
-                    ))}
+            {/* Results */}
+            {result && (
+              <div style={{ marginTop: 16 }}>
+                <h4 style={{ fontSize: 14, marginBottom: 8 }}>Results</h4>
+                {result.annotations?.map((ann: any, i: number) => (
+                  <div key={i} style={{ ...styles.card, marginTop: 8, padding: 12 }}>
+                    <p style={{ margin: 0, ...styles.mono, fontSize: 11, color: THEME.textMuted }}>{ann.image}</p>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                      {ann.labels?.map((label: any, j: number) => (
+                        <span key={j} style={styles.badge(THEME.accentBlue)}>
+                          {label.class} ({(label.confidence * 100).toFixed(0)}%)
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
 
-          {errorMsg && (
-            <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}>
-              <p style={{ margin: 0, color: THEME.danger }}>{errorMsg}</p>
+            {errorMsg && (
+              <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}>
+                <p style={{ margin: 0, color: THEME.danger, fontSize: 13 }}>{errorMsg}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Console */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: THEME.textMuted, marginBottom: 8 }}>Console</div>
+            <div style={{
+              ...styles.code,
+              height: 400, overflow: 'auto', margin: 0,
+              fontSize: 11, lineHeight: 1.6,
+            }}>
+              {logs.length === 0 ? (
+                <span style={{ color: '#666' }}>Click "Run Annotation" to start...</span>
+              ) : (
+                logs.map((log, i) => (
+                  <div key={i} style={{ color: log.includes('✅') ? '#4ade80' : log.includes('❌') ? '#f87171' : log.startsWith('  ') ? '#93c5fd' : '#d4d4d4' }}>
+                    {log}
+                  </div>
+                ))
+              )}
             </div>
-          )}
-        </>
+          </div>
+        </div>
       )}
     </div>
   )
