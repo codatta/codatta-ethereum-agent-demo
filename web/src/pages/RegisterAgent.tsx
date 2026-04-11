@@ -5,6 +5,7 @@ import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toH
 import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
 import { Link } from 'react-router-dom'
 import { THEME, styles } from '../lib/theme'
+import { ENV } from '../config/env'
 import { NetworkCheck } from '../components/NetworkCheck'
 
 const SERVICE_TYPES = [
@@ -41,9 +42,9 @@ export function RegisterAgent() {
     try {
       const url = new URL(base.includes('://') ? base : `http://${base}`)
       const host = `${url.protocol}//${url.hostname}`
-      setWebUrl(`${host}:4021`)
-      setMcpUrl(`${host}:4022/mcp`)
-      setA2aUrl(`${host}:4023/.well-known/agent-card.json`)
+      setWebUrl(`${host}:${ENV.DEFAULT_PORTS.web}`)
+      setMcpUrl(`${host}:${ENV.DEFAULT_PORTS.mcp}/mcp`)
+      setA2aUrl(`${host}:${ENV.DEFAULT_PORTS.a2a}/.well-known/agent-card.json`)
     } catch {
       setWebUrl('')
       setMcpUrl('')
@@ -331,7 +332,7 @@ export function RegisterAgent() {
                 const serviceEndpoint = JSON.stringify({
                   id: `did:codatta:${didHex}#erc8004`,
                   type: 'ERC8004Agent',
-                  serviceEndpoint: `eip155:31337:${addresses.identityRegistry}#${aid}`,
+                  serviceEndpoint: `eip155:${ENV.CHAIN_ID}:${addresses.identityRegistry}#${aid}`,
                 })
                 await writeContractAsync({
                   address: addresses.didRegistry, abi: didAbi,
@@ -423,7 +424,7 @@ export function RegisterAgent() {
               setVerifyStatus('checking')
               setVerifyError('')
               try {
-                const res = await fetch('http://127.0.0.1:4060/verify-mcp', {
+                const res = await fetch(ENV.INVITE_SERVICE_URL + '/verify-mcp', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ mcpUrl, requiredTools: svc?.requiredTools || [] }),
@@ -457,7 +458,7 @@ export function RegisterAgent() {
 cd agent && npm install
 cp .env.example .env && ./sync-env.sh
 npm run start:provider
-# MCP URL will be: http://localhost:4022/mcp`}</pre>
+# MCP URL will be on port ${ENV.DEFAULT_PORTS.mcp}`}</pre>
         </div>
 
         {verifyStatus === 'pass' && (

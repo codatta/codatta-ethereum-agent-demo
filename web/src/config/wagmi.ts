@@ -1,18 +1,19 @@
 import { http, createConfig } from 'wagmi'
 import { defineChain } from 'viem'
+import { ENV } from './env'
 
-export const anvilLocal = defineChain({
-  id: 31337,
-  name: 'Anvil Local',
+export const appChain = defineChain({
+  id: ENV.CHAIN_ID,
+  name: ENV.CHAIN_NAME,
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ['http://127.0.0.1:8086'] },
+    default: { http: [ENV.RPC_URL] },
   },
 })
 
 export const config = createConfig({
-  chains: [anvilLocal],
+  chains: [appChain],
   transports: {
-    [anvilLocal.id]: http(),
+    [appChain.id]: http(),
   },
 })

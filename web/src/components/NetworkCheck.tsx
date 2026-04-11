@@ -1,5 +1,5 @@
 import { useAccount, useSwitchChain } from 'wagmi'
-import { anvilLocal } from '../config/wagmi'
+import { appChain } from '../config/wagmi'
 import { THEME, styles } from '../lib/theme'
 
 export function NetworkCheck() {
@@ -7,7 +7,7 @@ export function NetworkCheck() {
   const { switchChain } = useSwitchChain()
 
   if (!isConnected) return null
-  if (chain?.id === anvilLocal.id) return null
+  if (chain?.id === appChain.id) return null
 
   return (
     <div style={{ ...styles.card, marginBottom: 16, background: 'rgba(239,68,68,0.04)', border: `1px solid ${THEME.danger}30` }}>
@@ -15,13 +15,13 @@ export function NetworkCheck() {
         Wrong network: {chain?.name || `Chain ${chain?.id}`}
       </p>
       <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>
-        Please switch to {anvilLocal.name} (Chain ID: {anvilLocal.id}) to interact with contracts.
+        Please switch to {appChain.name} (Chain ID: {appChain.id}) to interact with contracts.
       </p>
       <button
-        onClick={() => switchChain({ chainId: anvilLocal.id })}
+        onClick={() => switchChain({ chainId: appChain.id })}
         style={{ ...styles.btnPrimary, marginTop: 8, fontSize: 12, padding: '6px 16px' }}
       >
-        Switch to {anvilLocal.name}
+        Switch to {appChain.name}
       </button>
     </div>
   )

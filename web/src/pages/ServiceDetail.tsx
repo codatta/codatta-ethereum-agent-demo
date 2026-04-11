@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { parseAbi } from 'viem'
 import { addresses, reputationRegistryAbi } from '../config/contracts'
 import { THEME, styles } from '../lib/theme'
+import { ENV } from '../config/env'
 
 const SERVICE_INFO: Record<string, { name: string; description: string }> = {
   annotation: {
@@ -330,7 +331,7 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
       addLog('')
 
       const startTime = Date.now()
-      const res = await fetch('http://127.0.0.1:4060/try-annotate', {
+      const res = await fetch(ENV.INVITE_SERVICE_URL + '/try-annotate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mcpUrl: mcpEndpoint, images, task }),

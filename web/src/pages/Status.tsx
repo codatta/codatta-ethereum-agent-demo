@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { usePublicClient, useAccount } from 'wagmi'
 import { addresses } from '../config/contracts'
-import { anvilLocal } from '../config/wagmi'
+import { appChain } from '../config/wagmi'
 import { THEME, styles } from '../lib/theme'
 
 interface ContractStatus {
@@ -78,7 +78,7 @@ export function Status() {
         if (!cancelled) {
           setStatus({
             chainConnected, chainId,
-            chainName: chainId === anvilLocal.id ? 'Anvil Local' : `Chain ${chainId}`,
+            chainName: chainId === appChain.id ? appChain.name : `Chain ${chainId}`,
             blockNumber,
             walletConnected: isConnected,
             walletAddress: address || null,
@@ -115,8 +115,8 @@ export function Status() {
         {!status.allReady && (
           <p style={{ margin: '8px 0 0', fontSize: 13, color: THEME.textSecondary }}>
             {!status.chainConnected
-              ? 'Cannot connect to chain. Is Anvil running? (anvil --block-time 1)'
-              : 'Some contracts are not deployed. Run: forge script script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast'}
+              ? `Cannot connect to chain at ${appChain.rpcUrls.default.http[0]}`
+              : 'Some contracts are not deployed. Deploy contracts first.'}
           </p>
         )}
       </div>
@@ -130,7 +130,7 @@ export function Status() {
             <Row label="Chain" value={status.chainName} />
             <Row label="Chain ID" value={status.chainId?.toString() || '-'} />
             <Row label="Block Number" value={status.blockNumber?.toString() || '-'} />
-            <Row label="RPC" value={anvilLocal.rpcUrls.default.http[0]} />
+            <Row label="RPC" value={appChain.rpcUrls.default.http[0]} />
           </tbody>
         </table>
       </section>

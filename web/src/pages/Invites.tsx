@@ -18,7 +18,8 @@ interface InviteData {
   invites: InviteRecord[]
 }
 
-const INVITE_SERVICE_URL = 'http://127.0.0.1:4060'
+import { ENV } from '../config/env'
+const INVITE_SERVICE_URL = ENV.INVITE_SERVICE_URL
 
 export function Invites() {
   const [data, setData] = useState<InviteData | null>(null)

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 
-const INVITE_SERVICE_URL = 'http://127.0.0.1:4060'
+import { ENV } from '../config/env'
+const INVITE_SERVICE_URL = ENV.INVITE_SERVICE_URL
 
 export function useHiddenAgents() {
   const [hidden, setHidden] = useState<Set<string>>(new Set())
