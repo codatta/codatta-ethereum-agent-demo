@@ -1,40 +1,46 @@
 /**
- * XNY Design System tokens
- * Source: xny-rules-doc.md
+ * Design System — Notion-inspired
+ * Source: DESIGN.md
  */
 export const THEME = {
   // Surfaces
-  canvas: "#F5F5F5",
-  surface: "#FFFFFF",
+  canvas: "#ffffff",
+  warmWhite: "#f6f5f4",
+  surface: "#ffffff",
 
-  // Text
-  textPrimary: "#070707",
-  textSecondary: "#6B7280",
-  textMuted: "#9CA3AF",
+  // Text (warm, not pure black)
+  textPrimary: "rgba(0,0,0,0.95)",
+  textSecondary: "#615d59",
+  textMuted: "#a39e98",
+  warmDark: "#31302e",
 
-  // Accents
-  accentOrange: "#FFA800",
-  accentOrangeLight: "rgba(255,168,0,0.10)",
-  accentBlue: "#3474FE",
-  accentBlueLight: "rgba(52,116,254,0.08)",
+  // Accent
+  blue: "#0075de",
+  blueHover: "#005bab",
+  blueFocus: "#097fe8",
+  badgeBlueBg: "#f2f9ff",
+  badgeBlueText: "#097fe8",
 
-  // Actions
-  btnPrimary: "#070707",
-  btnPrimaryHover: "#1A1A1A",
-  danger: "#EF4444",
-  success: "#22C55E",
+  // Semantic
+  success: "#1aae39",
+  teal: "#2a9d99",
+  danger: "#dd5b00",
+  pink: "#ff64c8",
 
-  // Elevation
-  shadowCard: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)",
-  shadowCardHover: "0 4px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)",
+  // Borders & Shadows
+  border: "1px solid rgba(0,0,0,0.1)",
+  shadowCard: "rgba(0,0,0,0.04) 0px 4px 18px, rgba(0,0,0,0.027) 0px 2.025px 7.85px, rgba(0,0,0,0.02) 0px 0.8px 2.93px, rgba(0,0,0,0.01) 0px 0.175px 1.04px",
+  shadowDeep: "rgba(0,0,0,0.01) 0px 1px 3px, rgba(0,0,0,0.02) 0px 3px 7px, rgba(0,0,0,0.02) 0px 7px 15px, rgba(0,0,0,0.04) 0px 14px 28px, rgba(0,0,0,0.05) 0px 23px 52px",
 
   // Radii
-  radiusCard: 16,
-  radiusButton: 12,
-  radiusInput: 12,
+  radiusButton: 4,
+  radiusInput: 4,
+  radiusCard: 12,
+  radiusCardLarge: 16,
+  radiusPill: 9999,
 
   // Font
-  fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontFamily: '"Inter", -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif',
 } as const
 
 // Reusable style objects
@@ -42,6 +48,7 @@ export const styles = {
   card: {
     background: THEME.surface,
     borderRadius: THEME.radiusCard,
+    border: THEME.border,
     boxShadow: THEME.shadowCard,
     padding: 20,
   } as React.CSSProperties,
@@ -49,78 +56,96 @@ export const styles = {
   cardHover: {
     background: THEME.surface,
     borderRadius: THEME.radiusCard,
-    boxShadow: THEME.shadowCardHover,
+    border: THEME.border,
+    boxShadow: THEME.shadowCard,
     padding: 20,
     cursor: "pointer",
     transition: "box-shadow 0.2s",
   } as React.CSSProperties,
 
+  section: {
+    background: THEME.surface,
+    borderRadius: THEME.radiusCard,
+    border: THEME.border,
+    boxShadow: THEME.shadowCard,
+    padding: 20,
+    marginTop: 16,
+  } as React.CSSProperties,
+
   btnPrimary: {
-    padding: "10px 24px",
+    padding: "8px 16px",
     borderRadius: THEME.radiusButton,
-    border: "none",
-    background: THEME.btnPrimary,
-    color: THEME.surface,
-    fontSize: 14,
+    border: "1px solid transparent",
+    background: THEME.blue,
+    color: "#ffffff",
+    fontSize: 15,
     fontWeight: 600,
     cursor: "pointer",
+    transition: "background 0.15s",
   } as React.CSSProperties,
 
   btnSecondary: {
     padding: "8px 16px",
     borderRadius: THEME.radiusButton,
-    border: "none",
-    background: THEME.canvas,
+    border: "1px solid transparent",
+    background: "rgba(0,0,0,0.05)",
     color: THEME.textPrimary,
-    fontSize: 13,
+    fontSize: 15,
+    fontWeight: 500,
     cursor: "pointer",
   } as React.CSSProperties,
 
   btnDanger: {
     padding: "8px 16px",
     borderRadius: THEME.radiusButton,
-    border: "none",
-    background: "rgba(239,68,68,0.08)",
+    border: "1px solid transparent",
+    background: "rgba(221,91,0,0.08)",
     color: THEME.danger,
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: 500,
     cursor: "pointer",
   } as React.CSSProperties,
 
   btnSuccess: {
     padding: "8px 16px",
     borderRadius: THEME.radiusButton,
-    border: "none",
-    background: "rgba(34,197,94,0.08)",
+    border: "1px solid transparent",
+    background: "rgba(26,174,57,0.08)",
     color: THEME.success,
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: 500,
     cursor: "pointer",
   } as React.CSSProperties,
 
   input: {
     width: "100%",
-    padding: "10px 14px",
+    padding: "6px 10px",
     borderRadius: THEME.radiusInput,
-    border: "1px solid #E5E7EB",
+    border: "1px solid #dddddd",
     fontSize: 14,
     boxSizing: "border-box" as const,
     fontFamily: THEME.fontFamily,
+    color: "rgba(0,0,0,0.9)",
   } as React.CSSProperties,
 
   badge: (color: string) => ({
-    padding: "3px 10px",
-    borderRadius: 20,
+    padding: "4px 8px",
+    borderRadius: THEME.radiusPill,
     fontSize: 12,
-    fontWeight: 500,
+    fontWeight: 600,
+    letterSpacing: "0.125px",
     color,
-    background: `${color}15`,
+    background: `${color}12`,
   }) as React.CSSProperties,
 
-  section: {
-    background: THEME.surface,
-    borderRadius: THEME.radiusCard,
-    boxShadow: THEME.shadowCard,
-    padding: 20,
-    marginTop: 16,
+  badgeBlue: {
+    padding: "4px 8px",
+    borderRadius: THEME.radiusPill,
+    fontSize: 12,
+    fontWeight: 600,
+    letterSpacing: "0.125px",
+    color: THEME.badgeBlueText,
+    background: THEME.badgeBlueBg,
   } as React.CSSProperties,
 
   table: {
@@ -132,30 +157,30 @@ export const styles = {
     textAlign: "left" as const,
     padding: "8px 12px",
     fontSize: 12,
-    color: THEME.textMuted,
-    borderBottom: "1px solid #F3F4F6",
     fontWeight: 500,
+    color: THEME.textMuted,
+    borderBottom: THEME.border,
   } as React.CSSProperties,
 
   td: {
     padding: "8px 12px",
     fontSize: 14,
-    borderBottom: "1px solid #F9FAFB",
+    borderBottom: "1px solid rgba(0,0,0,0.05)",
     color: THEME.textPrimary,
   } as React.CSSProperties,
 
   mono: {
     fontFamily: "monospace",
-    fontSize: 12,
+    fontSize: 13,
   } as React.CSSProperties,
 
   code: {
     display: "block",
-    padding: "12px 16px",
-    background: "#1E1E1E",
-    color: "#D4D4D4",
-    borderRadius: 12,
-    fontSize: 12,
+    padding: "14px 16px",
+    background: THEME.warmDark,
+    color: "#d4d4d4",
+    borderRadius: THEME.radiusCard,
+    fontSize: 13,
     lineHeight: 1.5,
     overflow: "auto",
     margin: "8px 0",
