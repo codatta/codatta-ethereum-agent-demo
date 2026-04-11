@@ -28,7 +28,12 @@ VALIDATION_REGISTRY=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT
 update_env() {
   local key=$1 val=$2
   if grep -q "^${key}=" "$ENV_FILE"; then
-    sed -i '' "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+    # Compatible with both macOS and Linux sed
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      sed -i '' "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+    else
+      sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+    fi
   else
     echo "${key}=${val}" >> "$ENV_FILE"
   fi
