@@ -19,7 +19,6 @@ echo "============================================"
 echo "[1/6] Cleaning up old processes..."
 pkill -f "anvil" 2>/dev/null || true
 pkill -f "tsx src/invite-service" 2>/dev/null || true
-pkill -f "vite preview" 2>/dev/null || true
 sleep 2
 
 # ── Start Anvil ──────────────────────────────────────────
@@ -96,15 +95,34 @@ EOF
 
 npm install --silent 2>/dev/null
 npm run build
-nohup npx vite preview --host 0.0.0.0 --port 5173 > /tmp/web.log 2>&1 &
-sleep 2
+
+# Setup nginx
+echo "  Configuring nginx..."
+cat > /etc/nginx/sites-available/codatta << NGINX
+server {
+    listen 80;
+    server_name ${SERVER_IP};
+
+    root ${PROJECT_DIR}/web/dist;
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+}
+NGINX
+
+ln -sf /etc/nginx/sites-available/codatta /etc/nginx/sites-enabled/codatta
+rm -f /etc/nginx/sites-enabled/default 2>/dev/null
+nginx -t && systemctl reload nginx
+echo "  ✓ Web Dashboard served via nginx on port 80"
 
 echo ""
 echo "============================================"
 echo "  ✅ Deployment Complete!"
 echo "============================================"
 echo ""
-echo "  Web Dashboard:    http://${SERVER_IP}:5173"
+echo "  Web Dashboard:    http://${SERVER_IP}"
 echo "  Invite Service:   http://${SERVER_IP}:4060"
 echo "  Anvil RPC:        http://${SERVER_IP}:8086"
 echo ""
@@ -119,7 +137,7 @@ echo "    Private Key:  0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d
 echo "    Address:      0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 echo ""
 echo "  Quick Start:"
-echo "    1. Open http://${SERVER_IP}:5173"
+echo "    1. Open http://${SERVER_IP}"
 echo "    2. Import test account to MetaMask"
 echo "    3. Use Faucet to get ETH"
 echo "    4. Register Agent via + New Agent"
