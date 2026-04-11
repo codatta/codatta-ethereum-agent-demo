@@ -277,6 +277,8 @@ npm run start:client`}</Code>
   )
 }
 
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+
 function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
   const [imageUrls, setImageUrls] = useState('https://example.com/street-001.jpg\nhttps://example.com/street-002.jpg')
   const [task, setTask] = useState('object-detection')
@@ -302,36 +304,73 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
     const images = imageUrls.split('\n').map(u => u.trim()).filter(Boolean)
     if (images.length === 0) { setErrorMsg('Enter at least one image URL'); setStatus('idle'); return }
 
+    addLog('Initializing annotation request...')
     addLog(`Provider: ${topAgent?.name}`)
     addLog(`MCP endpoint: ${mcpEndpoint}`)
-    addLog(`Task: ${task}`)
-    addLog(`Images: ${images.length}`)
-    addLog('---')
-    addLog('Sending request to Invite Service proxy...')
+    addLog(`Service type: ${task}`)
+    addLog(`Input: ${images.length} image(s)`)
+    images.forEach((img, i) => addLog(`  [${i + 1}] ${img}`))
+    addLog('')
+
+    await sleep(300)
+    addLog('Connecting to Codatta Invite Service...')
+    addLog('POST /try-annotate')
+    addLog(`  mcpUrl: ${mcpEndpoint}`)
+    addLog(`  task: ${task}`)
+    addLog(`  images: ${images.length}`)
+
+    await sleep(200)
+    addLog('')
+    addLog('Invite Service → Provider REST endpoint')
+    addLog('Deriving REST URL from MCP endpoint...')
 
     try {
+      await sleep(300)
+      addLog('Sending annotation request to Provider...')
+      addLog('')
+
+      const startTime = Date.now()
       const res = await fetch('http://127.0.0.1:4060/try-annotate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mcpUrl: mcpEndpoint, images, task }),
       })
+
+      const elapsed = Date.now() - startTime
+      addLog(`Response received (${elapsed}ms)`)
+
       if (!res.ok) throw new Error(`Service unavailable: HTTP ${res.status}`)
       const data = await res.json() as any
       if (data.error) throw new Error(data.error)
 
       addLog(`Status: ${data.status}`)
-      addLog(`Annotations: ${data.annotations?.length || 0} images`)
-      data.annotations?.forEach((ann: any) => {
-        const labels = ann.labels?.map((l: any) => `${l.class}(${(l.confidence * 100).toFixed(0)}%)`).join(', ')
-        addLog(`  ${ann.image} → ${labels}`)
+      addLog(`Agent ID: ${data.agentId || 'N/A'}`)
+      addLog('')
+      addLog(`Processing ${data.annotations?.length || 0} annotation(s):`)
+      addLog('')
+      data.annotations?.forEach((ann: any, i: number) => {
+        addLog(`  Image ${i + 1}: ${ann.image}`)
+        ann.labels?.forEach((label: any) => {
+          addLog(`    ├─ ${label.class}`)
+          addLog(`    │  confidence: ${(label.confidence * 100).toFixed(1)}%`)
+          addLog(`    │  bbox: [${label.bbox?.join(', ')}]`)
+        })
+        addLog('')
       })
-      addLog('---')
-      addLog('✅ Done')
+
+      addLog('─'.repeat(40))
+      addLog(`Total images: ${data.annotations?.length || 0}`)
+      addLog(`Total labels: ${data.annotations?.reduce((sum: number, a: any) => sum + (a.labels?.length || 0), 0) || 0}`)
+      addLog(`Response time: ${elapsed}ms`)
+      addLog('')
+      addLog('✅ Annotation completed successfully')
 
       setResult(data)
       setStatus('done')
     } catch (err: any) {
+      addLog('')
       addLog(`❌ Error: ${err.message}`)
+      addLog('Check that the Provider is running and accessible.')
       setErrorMsg(err.message)
       setStatus('error')
     }
