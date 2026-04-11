@@ -23,7 +23,10 @@ export function RegisterAgent() {
   const [selectedService, setSelectedService] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [webUrl, setWebUrl] = useState('')
   const [mcpUrl, setMcpUrl] = useState('')
+  const [a2aUrl, setA2aUrl] = useState('')
   const [didHex, setDidHex] = useState('')
   const [agentId, setAgentId] = useState('')
   const [existingDid, setExistingDid] = useState('')
@@ -32,6 +35,24 @@ export function RegisterAgent() {
   const [verifyStatus, setVerifyStatus] = useState<'idle' | 'checking' | 'pass' | 'fail'>('idle')
   const [verifyError, setVerifyError] = useState('')
   const [txLoading, setTxLoading] = useState(false)
+
+  function deriveEndpoints(base: string) {
+    setBaseUrl(base)
+    try {
+      const url = new URL(base)
+      const port = parseInt(url.port) || 4021
+      const host = `${url.protocol}//${url.hostname}`
+      setWebUrl(`${host}:${port}`)
+      setMcpUrl(`${host}:${port + 1}/mcp`)
+      setA2aUrl(`${host}:${port + 2}/.well-known/agent-card.json`)
+    } catch {
+      setWebUrl('')
+      setMcpUrl('')
+      setA2aUrl('')
+    }
+    setVerifyStatus('idle')
+    setVerifyError('')
+  }
   const [error, setError] = useState<string | null>(null)
 
   const { address } = useAccount()
@@ -360,36 +381,56 @@ export function RegisterAgent() {
         </div>
 
         <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>
-          Deploy your MCP service, then paste the URL below. We'll verify that it exposes the required tools.
+          Enter your service base URL. Other endpoints will be auto-derived. You can adjust them if needed.
         </p>
 
-        <p style={{ fontSize: 13, color: THEME.textMuted, marginBottom: 12 }}>
-          Required tools: {svc?.requiredTools.map(t => <code key={t} style={{ marginRight: 4 }}>{t}</code>)}
-        </p>
+        <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
+          <label>
+            <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Base URL</span>
+            <input
+              placeholder="http://your-server-ip:4021"
+              value={baseUrl}
+              onChange={e => deriveEndpoints(e.target.value)}
+              style={styles.input}
+            />
+            <p style={{ fontSize: 11, color: THEME.textMuted, margin: '4px 0 0' }}>
+              Use a public IP or domain. Other endpoints are derived automatically.
+            </p>
+          </label>
 
-        <div style={{ display: 'flex', gap: 8, maxWidth: 500 }}>
-          <input
-            placeholder="http://your-server-ip:4022/mcp"
-            value={mcpUrl}
-            onChange={e => { setMcpUrl(e.target.value); setVerifyStatus('idle'); setVerifyError('') }}
-            style={{ ...styles.input, flex: 1 }}
-          />
+          {baseUrl && (
+            <>
+              <label>
+                <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>HTTP REST</span>
+                <input value={webUrl} onChange={e => setWebUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
+              </label>
+              <label>
+                <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>MCP</span>
+                <input value={mcpUrl} onChange={e => setMcpUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
+              </label>
+              <label>
+                <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>A2A</span>
+                <input value={a2aUrl} onChange={e => setA2aUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
+              </label>
+            </>
+          )}
+
+          <p style={{ fontSize: 13, color: THEME.textMuted }}>
+            Required MCP tools: {svc?.requiredTools.map(t => <code key={t} style={{ marginRight: 4 }}>{t}</code>)}
+          </p>
+
           <button
             onClick={async () => {
               setVerifyStatus('checking')
               setVerifyError('')
               try {
-                // Server-side verification via Invite Service
                 const res = await fetch('http://127.0.0.1:4060/verify-mcp', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    mcpUrl,
-                    requiredTools: svc?.requiredTools || [],
-                  }),
+                  body: JSON.stringify({ mcpUrl, requiredTools: svc?.requiredTools || [] }),
                 })
-                if (!res.ok) throw new Error(`Verification service unavailable`)
-                const data = await res.json() as { status: string; error?: string; tools?: string[] }
+                if (!res.ok) throw new Error('Verification service unavailable')
+                const data = await res.json() as { status: string; error?: string }
                 if (data.status === 'pass') {
                   setVerifyStatus('pass')
                 } else {
@@ -402,15 +443,11 @@ export function RegisterAgent() {
               }
             }}
             disabled={!mcpUrl || verifyStatus === 'checking'}
-            style={{ ...styles.btnPrimary, opacity: !mcpUrl ? 0.4 : 1, whiteSpace: 'nowrap' }}
+            style={{ ...styles.btnPrimary, opacity: !mcpUrl ? 0.4 : 1 }}
           >
-            {verifyStatus === 'checking' ? 'Verifying...' : 'Verify'}
+            {verifyStatus === 'checking' ? 'Verifying...' : 'Verify Endpoints'}
           </button>
         </div>
-
-        <p style={{ fontSize: 12, color: THEME.textMuted, marginTop: 8, maxWidth: 500 }}>
-          Use a public IP or domain. The server needs to reach your MCP endpoint to verify tools.
-        </p>
 
         {/* Demo download hint */}
         <div style={{ ...styles.card, marginTop: 12, maxWidth: 500, background: THEME.accentBlueLight }}>
@@ -446,7 +483,9 @@ npm run start:provider
                     serviceType: selectedService,
                     image: 'https://codatta.io/agents/default/avatar.png',
                     services: [
+                      ...(webUrl ? [{ name: 'web', endpoint: webUrl }] : []),
                       { name: 'MCP', endpoint: mcpUrl, version: '2025-06-18' },
+                      ...(a2aUrl ? [{ name: 'A2A', endpoint: a2aUrl, version: '0.3.0' }] : []),
                       { name: 'DID', endpoint: `did:codatta:${didHex}`, version: 'v1' },
                     ],
                     active: true,
