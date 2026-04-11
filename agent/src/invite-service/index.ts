@@ -441,6 +441,27 @@ async function main() {
     }
   });
 
+  // ── Faucet ──────────────────────────────────────────────────
+
+  const FAUCET_AMOUNT = ethers.parseEther("1.0");
+
+  app.post("/faucet", async (req, res) => {
+    const { address } = req.body;
+    if (!address) {
+      res.status(400).json({ error: "address required" });
+      return;
+    }
+    try {
+      const tx = await signer.sendTransaction({ to: address, value: FAUCET_AMOUNT });
+      await tx.wait();
+      log.info(`Faucet: sent 1 ETH to ${address}`);
+      res.json({ status: "ok", txHash: tx.hash, amount: "1.0 ETH" });
+    } catch (err: any) {
+      log.info(`Faucet failed: ${err.message}`);
+      res.json({ error: err.message });
+    }
+  });
+
   // ── Health ──────────────────────────────────────────────────
 
   app.get("/health", (_req, res) => {
