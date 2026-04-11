@@ -84,7 +84,7 @@ cd ../web
 
 # Write web .env
 cat > .env << EOF
-VITE_INVITE_SERVICE_URL=http://${SERVER_IP}:4060
+VITE_INVITE_SERVICE_URL=http://${SERVER_IP}/api
 VITE_RPC_URL=http://${SERVER_IP}:8086
 VITE_CHAIN_ID=31337
 VITE_CHAIN_NAME=Codatta Testnet
@@ -108,6 +108,13 @@ server {
 
     location / {
         try_files \$uri \$uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:4060/;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
 }
 NGINX
