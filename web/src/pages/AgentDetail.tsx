@@ -14,10 +14,6 @@ export function AgentDetail() {
 
   const reg = detail.registrationFile
   const services = reg?.services || []
-  const hasMCP = services.some(s => s.name === 'MCP')
-  const hasA2A = services.some(s => s.name === 'A2A')
-  const mcpEndpoint = services.find(s => s.name === 'MCP')?.endpoint
-  const a2aEndpoint = services.find(s => s.name === 'A2A')?.endpoint
 
   return (
     <div>
@@ -43,37 +39,35 @@ export function AgentDetail() {
       {/* Status tags */}
       <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
         {reg?.active && <span style={styles.badge(THEME.success)}>Active</span>}
-        {hasMCP && <span style={styles.badge(THEME.accentBlue)}>MCP</span>}
-        {hasA2A && <span style={styles.badge(THEME.accentBlue)}>A2A</span>}
+        {services.some(s => s.name === 'MCP') && <span style={styles.badge(THEME.accentBlue)}>MCP</span>}
+        {services.some(s => s.name === 'A2A') && <span style={styles.badge(THEME.accentBlue)}>A2A</span>}
         {reg?.x402Support && <span style={styles.badge(THEME.accentOrange)}>x402 Payment</span>}
         {reg?.supportedTrust?.map(t => <span key={t} style={styles.badge(THEME.textSecondary)}>{t}</span>)}
       </div>
 
-      {/* How to connect */}
-      <section style={styles.section}>
-        <h3>How to Connect</h3>
-        {hasMCP && (
-          <div style={{ marginBottom: 12 }}>
-            <strong style={{ fontSize: 13 }}>MCP (Recommended)</strong>
-            <p style={{ margin: '4px 0', fontSize: 13, color: THEME.textSecondary }}>
-              Connect via MCP to discover tools and invoke annotation directly.
-            </p>
-            <code style={{ ...styles.code, background: THEME.canvas, color: THEME.textPrimary }}>{mcpEndpoint}</code>
+      {/* Service Endpoints */}
+      {services.length > 0 && (
+        <section style={styles.section}>
+          <h3>Service Endpoints</h3>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {services.map((svc, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ ...styles.badge(THEME.accentBlue), minWidth: 40, textAlign: 'center' }}>{svc.name}</span>
+                <code style={{ ...styles.mono, fontSize: 12, color: THEME.textPrimary, flex: 1, wordBreak: 'break-all', userSelect: 'all' }}>
+                  {svc.endpoint}
+                </code>
+                {svc.version && <span style={{ fontSize: 11, color: THEME.textMuted }}>{svc.version}</span>}
+                <button
+                  onClick={() => navigator.clipboard.writeText(svc.endpoint)}
+                  style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, padding: 0, flexShrink: 0 }}
+                >
+                  Copy
+                </button>
+              </div>
+            ))}
           </div>
-        )}
-        {hasA2A && (
-          <div>
-            <strong style={{ fontSize: 13 }}>A2A (Consultation)</strong>
-            <p style={{ margin: '4px 0', fontSize: 13, color: THEME.textSecondary }}>
-              Chat with the provider to ask about capabilities, pricing, and get an invite code.
-            </p>
-            <code style={{ ...styles.code, background: THEME.canvas, color: THEME.textPrimary }}>{a2aEndpoint}</code>
-          </div>
-        )}
-        <p style={{ margin: '12px 0 0', fontSize: 13 }}>
-          <Link to="/service/annotation">See integration guide →</Link>
-        </p>
-      </section>
+        </section>
+      )}
 
       {/* Reputation & Feedback */}
       <section style={styles.section}>
