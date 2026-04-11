@@ -66,4 +66,5 @@
 
 ## 代码整理
 
+- [ ] **项目目录结构重组** — 合约移到 contracts/、agent/ 和 web/ 保持不变，Foundry 配置（foundry.toml、remappings.txt、lib/）移入 contracts/，更新所有引用路径（deployment.json、sync-env.sh、web contracts.ts 等）
 - [ ] **DID 合约回迁 codatta-did repo** — 当前 src/did/ 是从 codatta-did 复制的，InviteRegistrar 也写在这里。需要将改动合并回 codatta-did 项目，这边改为 submodule 引用
