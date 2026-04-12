@@ -265,9 +265,14 @@ cd codatta-ethereum-agent-demo/agent
 # Install dependencies
 npm install
 
-# Configure (update .env with contract addresses)
+# Configure
 cp .env.example .env
 ./sync-env.sh
+
+# Edit .env — update the following:
+#   CLIENT_PRIVATE_KEY=0xYourPrivateKeyHere
+#   LOCAL_RPC_URL=https://erc8004.codatta.io/rpc
+#   INVITE_SERVICE_URL=https://erc8004.codatta.io/api
 
 # Run the client
 npm run start:client`}</Code>
