@@ -273,6 +273,9 @@ cp .env.example .env
 #   CLIENT_PRIVATE_KEY=0xYourPrivateKeyHere
 #   LOCAL_RPC_URL=https://erc8004.codatta.io/rpc
 #   INVITE_SERVICE_URL=https://erc8004.codatta.io/api
+#
+# Your wallet needs ETH for gas. Get test ETH from
+# the Faucet on the web dashboard (bottom of the page).
 
 # Run the client
 npm run start:client`}</Code>
