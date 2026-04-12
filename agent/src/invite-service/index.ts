@@ -473,7 +473,7 @@ async function main() {
     });
   });
 
-  app.listen(INVITE_SERVICE_PORT, () => {
+  app.listen(INVITE_SERVICE_PORT, "0.0.0.0", () => {
     log.success(`Invite Service running on http://127.0.0.1:${INVITE_SERVICE_PORT}`);
     log.info("  POST /generate                    — generate signed invite code");
     log.info("  GET  /invites                     — all invite records");

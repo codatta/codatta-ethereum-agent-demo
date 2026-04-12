@@ -123,7 +123,7 @@ export function startAnnotationService(): Promise<string> {
       res.json({ status: "ok", service: "codatta-annotation-backend", tasksInMemory: tasks.size });
     });
 
-    app.listen(ANNOTATION_SERVICE_PORT, () => {
+    app.listen(ANNOTATION_SERVICE_PORT, "0.0.0.0", () => {
       const url = `http://localhost:${ANNOTATION_SERVICE_PORT}`;
       log.info(`[annotation-svc] Mock backend running on ${url}`);
       resolve(url);

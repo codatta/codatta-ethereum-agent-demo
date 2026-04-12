@@ -457,7 +457,7 @@ async function main() {
     }
   });
 
-  mcpApp.listen(MCP_PORT, () => {
+  mcpApp.listen(MCP_PORT, "0.0.0.0", () => {
     log.success(`MCP server running on ${mcpEndpointUrl}`);
     log.info("  Tool: annotate(images, task, labels?, clientAddress?)");
   });
@@ -637,7 +637,7 @@ async function main() {
   a2aApp.use("/.well-known/agent-card.json", agentCardHandler({ agentCardProvider: a2aHandler }));
   a2aApp.use("/", jsonRpcHandler({ requestHandler: a2aHandler, userBuilder: UserBuilder.noAuthentication }));
 
-  a2aApp.listen(A2A_PORT, () => {
+  a2aApp.listen(A2A_PORT, "0.0.0.0", () => {
     log.success(`A2A consultation running on http://localhost:${A2A_PORT}`);
     log.info("  Skills: consult, invite");
   });
@@ -704,7 +704,7 @@ async function main() {
     res.json({ status: "ok", agentId: agentId.toString(), active: true });
   });
 
-  app.listen(PROVIDER_PORT, () => {
+  app.listen(PROVIDER_PORT, "0.0.0.0", () => {
     log.success(`HTTP service running on http://localhost:${PROVIDER_PORT}`);
     log.info("  POST /annotate  — REST endpoint");
     log.info("  GET  /health    — health check");
