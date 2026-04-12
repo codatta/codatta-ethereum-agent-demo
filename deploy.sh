@@ -58,6 +58,9 @@ bash sync-env.sh
 # Ensure all config present
 grep -q "INVITE_SERVICE_URL" .env || echo "INVITE_SERVICE_URL=http://127.0.0.1:4060" >> .env
 grep -q "INVITE_REGISTRAR" .env || echo "INVITE_REGISTRAR=$(python3 -c "import json; print(json.load(open('../script/deployment.json'))['inviteRegistrar'])")" >> .env
+grep -q "PROVIDER_PRIVATE_KEY" .env || echo "PROVIDER_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a" >> .env
+grep -q "INVITE_SERVICE_PRIVATE_KEY" .env || echo "INVITE_SERVICE_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" >> .env
+grep -q "RECRUITER_PRIVATE_KEY" .env || echo "RECRUITER_PRIVATE_KEY=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6" >> .env
 
 # Update RPC URL
 sed -i "s|LOCAL_RPC_URL=.*|LOCAL_RPC_URL=http://127.0.0.1:8086|" .env

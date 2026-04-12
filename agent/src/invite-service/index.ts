@@ -18,7 +18,7 @@ import * as log from "../shared/logger.js";
 
 log.setRole("invite-svc");
 
-const signer = getWallet("DEPLOYER_PRIVATE_KEY");
+const signer = getWallet("INVITE_SERVICE_PRIVATE_KEY");
 const INVITE_SERVICE_PORT = 4060;
 const DATA_FILE = path.join(import.meta.dirname, "../../invite-service-data.json");
 

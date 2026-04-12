@@ -27,7 +27,7 @@ import * as log from "../shared/logger.js";
 
 log.setRole("recruiter");
 
-const wallet = getWallet("DEPLOYER_PRIVATE_KEY");
+const wallet = getWallet("RECRUITER_PRIVATE_KEY");
 const identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, provider);
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, provider);
 

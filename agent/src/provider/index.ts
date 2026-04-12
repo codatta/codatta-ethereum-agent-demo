@@ -37,7 +37,7 @@ const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
 // ── Wallet setup ────────────────────────────────────────────────
 
 async function getOrCreateWallet(): Promise<ethers.Wallet> {
-  const envKey = process.env.PROVIDER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY;
+  const envKey = process.env.PROVIDER_PRIVATE_KEY;
   if (envKey) {
     return new ethers.Wallet(envKey, provider);
   }
