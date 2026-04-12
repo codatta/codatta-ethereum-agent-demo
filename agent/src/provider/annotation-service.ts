@@ -11,7 +11,7 @@
 import express from "express";
 import * as log from "../shared/logger.js";
 
-const ANNOTATION_SERVICE_PORT = 4050;
+const ANNOTATION_SERVICE_PORT = 4150;
 
 // ── In-memory task store ────────────────────────────────────────
 

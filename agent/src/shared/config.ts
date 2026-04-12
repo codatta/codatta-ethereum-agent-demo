@@ -25,5 +25,5 @@ export const addresses = {
   validationRegistry: process.env.VALIDATION_REGISTRY!,
 };
 
-export const PROVIDER_PORT = parseInt(process.env.PROVIDER_PORT || "4021");
-export const INVITE_SERVICE_URL = process.env.INVITE_SERVICE_URL || "http://127.0.0.1:4060";
+export const PROVIDER_PORT = parseInt(process.env.PROVIDER_PORT || "4121");
+export const INVITE_SERVICE_URL = process.env.INVITE_SERVICE_URL || "http://127.0.0.1:4160";

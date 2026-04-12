@@ -56,7 +56,7 @@ cp .env.example .env 2>/dev/null || true
 bash sync-env.sh
 
 # Ensure all config present
-grep -q "INVITE_SERVICE_URL" .env || echo "INVITE_SERVICE_URL=http://127.0.0.1:4060" >> .env
+grep -q "INVITE_SERVICE_URL" .env || echo "INVITE_SERVICE_URL=http://127.0.0.1:4160" >> .env
 grep -q "INVITE_REGISTRAR" .env || echo "INVITE_REGISTRAR=$(python3 -c "import json; print(json.load(open('../script/deployment.json'))['inviteRegistrar'])")" >> .env
 grep -q "PROVIDER_PRIVATE_KEY" .env || echo "PROVIDER_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a" >> .env
 grep -q "INVITE_SERVICE_PRIVATE_KEY" .env || echo "INVITE_SERVICE_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" >> .env
@@ -69,11 +69,11 @@ npm install --silent 2>/dev/null
 echo "  ✓ Agent configured"
 
 # ── Start Invite Service ─────────────────────────────────
-echo "[5/6] Starting Invite Service on port 4060..."
+echo "[5/6] Starting Invite Service on port 4160..."
 nohup npx tsx src/invite-service/index.ts > /tmp/invite-service.log 2>&1 &
 sleep 3
 
-if curl -s http://127.0.0.1:4060/health | grep -q "ok"; then
+if curl -s http://127.0.0.1:4160/health | grep -q "ok"; then
   echo "  ✓ Invite Service running"
 else
   echo "  ✗ Invite Service failed to start"
@@ -114,7 +114,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://127.0.0.1:4060/;
+        proxy_pass http://127.0.0.1:4160/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
