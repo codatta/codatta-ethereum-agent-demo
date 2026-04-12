@@ -287,9 +287,10 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
   const [result, setResult] = useState<any>(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [logs, setLogs] = useState<string[]>([])
+  const [selectedIdx, setSelectedIdx] = useState(0)
 
-  const topAgent = agents[0]
-  const mcpEndpoint = topAgent?.services.find(s => s.name === 'MCP')?.endpoint
+  const selectedAgent = agents[selectedIdx] || agents[0]
+  const mcpEndpoint = selectedAgent?.services.find(s => s.name === 'MCP')?.endpoint
 
   function addLog(msg: string) {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
@@ -306,7 +307,7 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
     if (images.length === 0) { setErrorMsg('Enter at least one image URL'); setStatus('idle'); return }
 
     addLog('Initializing annotation request...')
-    addLog(`Provider: ${topAgent?.name}`)
+    addLog(`Provider: ${selectedAgent?.name}`)
     addLog(`MCP endpoint: ${mcpEndpoint}`)
     addLog(`Service type: ${task}`)
     addLog(`Input: ${images.length} image(s)`)
@@ -391,11 +392,19 @@ function AnnotationTryIt({ agents }: { agents: AgentWithScore[] }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           {/* Left: Input */}
           <div>
-            <div style={{ ...styles.card, marginBottom: 12 }}>
-              <p style={{ margin: 0, fontSize: 12, color: THEME.textMuted }}>
-                Provider: <strong style={{ color: THEME.textPrimary }}>{topAgent?.name}</strong>
-              </p>
-            </div>
+            <label>
+              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Provider</span>
+              <select
+                value={selectedIdx}
+                onChange={e => setSelectedIdx(Number(e.target.value))}
+                style={styles.input}
+                disabled={status === 'submitting'}
+              >
+                {agents.map((a, i) => (
+                  <option key={i} value={i}>{a.name} (reputation: {a.reputationScore})</option>
+                ))}
+              </select>
+            </label>
 
             <div style={{ display: 'grid', gap: 12 }}>
               <label>
