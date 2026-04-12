@@ -13,12 +13,26 @@ import * as log from "../shared/logger.js";
 log.setRole("client");
 
 const wallet = getWallet("CLIENT_PRIVATE_KEY");
-const identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, provider);
+const identity = new ethers.Contract(addresses.identityRegistry, IdentityRegistryABI, wallet);
 const didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, provider);
 const inviteRegistrar = new ethers.Contract(addresses.inviteRegistrar, InviteRegistrarABI, wallet);
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, wallet);
 
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
+const CLIENT_IDENTITY_FILE = path.join(import.meta.dirname, "../../client-identity.json");
+
+function loadClientIdentity(): { agentId?: string; chainId?: number } | null {
+  try {
+    if (fs.existsSync(CLIENT_IDENTITY_FILE)) {
+      return JSON.parse(fs.readFileSync(CLIENT_IDENTITY_FILE, "utf-8"));
+    }
+  } catch {}
+  return null;
+}
+
+function saveClientIdentity(data: { agentId: string; chainId: number }) {
+  fs.writeFileSync(CLIENT_IDENTITY_FILE, JSON.stringify(data, null, 2));
+}
 
 function askUser(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -30,26 +44,35 @@ function askUser(question: string): Promise<string> {
   });
 }
 
-async function discoverAgentId(): Promise<bigint> {
-  // Method 1: Query on-chain Registered events from ERC-8004 IdentityRegistry
-  log.info("Querying ERC-8004 IdentityRegistry for registered agents...");
+async function discoverProviderId(excludeOwner: string): Promise<bigint> {
+  // Method 1: Query on-chain Registered events, find a provider (not ourselves)
+  log.info("Querying ERC-8004 IdentityRegistry for providers...");
   try {
     const registeredEvents = await identity.queryFilter(
       identity.filters.Registered()
     );
-    if (registeredEvents.length > 0) {
-      // Pick the latest registered agent
-      const latest = registeredEvents[registeredEvents.length - 1];
-      const agentId = (latest as any).args.agentId || (latest as any).args[0];
-      log.info(`Found ${registeredEvents.length} agent(s) on-chain, using latest`);
-      return BigInt(agentId);
+    // Iterate from newest to oldest, skip agents owned by us
+    for (let i = registeredEvents.length - 1; i >= 0; i--) {
+      const evt = registeredEvents[i] as any;
+      const id = BigInt(evt.args.agentId || evt.args[0]);
+      const owner = evt.args.owner || evt.args[2];
+      if (owner.toLowerCase() === excludeOwner.toLowerCase()) continue;
+
+      // Check if it has MCP service (i.e. it's a provider)
+      try {
+        const uri = await identity.tokenURI(id);
+        if (uri.includes("MCP")) {
+          log.info(`Found provider: agentId=${id} (${registeredEvents.length} total agents on-chain)`);
+          return id;
+        }
+      } catch {}
     }
   } catch (err: any) {
     log.info(`On-chain query failed: ${err.message}`);
   }
 
   // Method 2: Fallback to local agent-info.json (for co-located dev)
-  log.info("No on-chain agents found, checking local agent-info.json...");
+  log.info("No providers found on-chain, checking local agent-info.json...");
   for (let i = 0; i < 10; i++) {
     if (fs.existsSync(AGENT_INFO_FILE)) {
       try {
@@ -59,7 +82,7 @@ async function discoverAgentId(): Promise<bigint> {
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error("No agents found — check RPC connection or register an agent first");
+  throw new Error("No providers found — check RPC connection or register a provider first");
 }
 
 // ── A2A helpers ─────────────────────────────────────────────────
@@ -114,10 +137,55 @@ async function main() {
   log.header(`Client Agent — Chain ${network.chainId}`);
   log.info("Address:", wallet.address);
 
-  // ── Step 1: Discover Agent from ERC-8004 ──────────────────────
-  log.step("Discovering agent from ERC-8004");
+  // ── Step 1: Register Client on ERC-8004 ──────────────────────
+  log.step("Registering client identity (ERC-8004)");
 
-  const agentId = await discoverAgentId();
+  let clientAgentId: bigint;
+  const saved = loadClientIdentity();
+
+  if (saved?.agentId && saved?.chainId === Number(network.chainId)) {
+    clientAgentId = BigInt(saved.agentId);
+    try {
+      const owner = await identity.ownerOf(clientAgentId);
+      if (owner.toLowerCase() === wallet.address.toLowerCase()) {
+        log.success(`Client already registered: agentId=${clientAgentId}`);
+      } else {
+        throw new Error("Owner mismatch");
+      }
+    } catch {
+      log.info("Saved identity invalid, re-registering...");
+      saved.agentId = undefined;
+    }
+  }
+
+  if (!saved?.agentId) {
+    const tokenUri = Buffer.from(JSON.stringify({
+      name: "Client Agent",
+      description: "Data annotation consumer",
+      type: "client",
+      services: [],
+    })).toString("base64");
+
+    log.info("Registering on IdentityRegistry...");
+    const tx = await identity.register(`data:application/json;base64,${tokenUri}`);
+    const receipt = await tx.wait();
+
+    const regEvent = receipt.logs
+      .map((l: ethers.Log) => {
+        try { return identity.interface.parseLog({ topics: [...l.topics], data: l.data }); }
+        catch { return null; }
+      })
+      .find((e: ethers.LogDescription | null) => e?.name === "Registered");
+
+    clientAgentId = BigInt(regEvent!.args.agentId);
+    saveClientIdentity({ agentId: clientAgentId.toString(), chainId: Number(network.chainId) });
+    log.success(`Registered: agentId=${clientAgentId}`);
+  }
+
+  // ── Step 2: Discover Provider from ERC-8004 ─────────────────
+  log.step("Discovering provider from ERC-8004");
+
+  const agentId = await discoverProviderId(wallet.address);
   log.info("Agent ID:", agentId.toString());
 
   const agentURI = await identity.tokenURI(agentId);
@@ -140,7 +208,7 @@ async function main() {
   const a2aService = services.find(s => s.name === "A2A");
   if (!mcpService) throw new Error("No MCP endpoint found");
 
-  // ── Step 2: A2A consultation — learn about services + get invite ─
+  // ── Step 3: A2A consultation — learn about services + get invite ─
   log.step("A2A consultation with Provider");
 
   if (a2aService) {
@@ -233,7 +301,7 @@ async function main() {
       log.success(`Invite received: nonce=${inviteData.nonce}, inviter=${inviteData.inviter?.slice(0, 10)}...`);
       log.info(`InviteRegistrar: ${inviteData.inviteRegistrar}`);
 
-      // ── Step 3: Register Codatta DID (with user confirmation) ────
+      // ── Step 4: Register Codatta DID (with user confirmation) ────
       log.step("Register Codatta DID?");
       log.info("Benefits: free DID registration with on-chain invite attribution");
       log.info("Cost: Free (on-chain transaction)");
@@ -244,7 +312,7 @@ async function main() {
       const accepted = answer === "y" || answer === "yes";
 
       if (accepted) {
-        // ── Step 3b: Register DID via InviteRegistrar (on-chain) ──
+        // ── Step 4b: Register DID via InviteRegistrar (on-chain) ──
         log.step("Registering Codatta DID with invite code (on-chain)");
         log.info(`Inviter: ${inviteData.inviter}`);
         log.info(`Nonce: ${inviteData.nonce}`);
@@ -271,7 +339,7 @@ async function main() {
         log.info("Declined DID registration. Proceeding without invite.");
       }
 
-      // ── Step 4: Connect MCP and use annotation service ──────────
+      // ── Step 5: Connect MCP and use annotation service ──────────
       log.step(accepted ? "Requesting annotation" : "Requesting annotation (paid mode)");
 
       const mcpClient = new Client({ name: "codatta-client", version: "1.0.0" });
@@ -281,7 +349,7 @@ async function main() {
       const { tools } = await mcpClient.listTools();
       log.info(`Discovered ${tools.length} tool(s): ${tools.map(t => t.name).join(", ")}`);
 
-      // ── Step 5: Annotate ──────────────────────────────────────────
+      // ── Step 6: Annotate ──────────────────────────────────────────
       const images = [
         "https://example.com/street-001.jpg",
         "https://example.com/street-002.jpg",
@@ -327,7 +395,7 @@ async function main() {
 
       await mcpClient.close();
 
-      // ── Step 6: Submit reputation feedback ──────────────────────
+      // ── Step 7: Submit reputation feedback ──────────────────────
       log.step("Submitting reputation feedback");
 
       if (result.feedbackAuth) {
