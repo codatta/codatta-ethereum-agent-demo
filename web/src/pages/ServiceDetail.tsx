@@ -212,37 +212,10 @@ function AnnotationGuide() {
     <div style={{ marginTop: 32 }}>
       <h3>Integration Guide — Data Annotation</h3>
       <p style={{ color: THEME.textSecondary, fontSize: 13, marginBottom: 16 }}>
-        Two ways to use this service: quick MCP call, or full flow with A2A consultation and free quota.
+        Run the client script to experience the full flow: identity registration, A2A consultation, MCP annotation, and reputation feedback.
       </p>
 
       <div style={{ display: 'grid', gap: 16 }}>
-        <GuideSection title="Quick Start (MCP)">
-          <p>Connect to the provider's MCP endpoint and call the <code>annotate</code> tool directly:</p>
-          <Code>{`const client = new Client({ name: "my-client", version: "1.0.0" });
-await client.connect(new StreamableHTTPClientTransport(new URL(mcpEndpoint)));
-
-// Discover tools
-const { tools } = await client.listTools();
-// → annotate, get_task_status, claim_invite
-
-// Submit annotation task (async)
-const result = await client.callTool({
-  name: "annotate",
-  arguments: {
-    images: ["https://example.com/img-001.jpg", "https://example.com/img-002.jpg"],
-    task: "object-detection"
-  }
-});
-// → { taskId: "task-xxx", status: "working" }
-
-// Poll for results
-const status = await client.callTool({
-  name: "get_task_status",
-  arguments: { taskId: "task-xxx" }
-});
-// → { status: "completed", annotations: [...] }`}</Code>
-        </GuideSection>
-
         <GuideSection title="Full Flow (A2A + Free Quota)">
           <ol style={{ paddingLeft: 20, fontSize: 13, lineHeight: 2 }}>
             <li><strong>A2A Consultation</strong> — Chat with the provider to learn about capabilities and pricing</li>
