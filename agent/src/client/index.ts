@@ -31,8 +31,26 @@ function askUser(question: string): Promise<string> {
 }
 
 async function discoverAgentId(): Promise<bigint> {
-  log.info("Querying marketplace for agents... (reading agent-info.json)");
-  for (let i = 0; i < 60; i++) {
+  // Method 1: Query on-chain Registered events from ERC-8004 IdentityRegistry
+  log.info("Querying ERC-8004 IdentityRegistry for registered agents...");
+  try {
+    const registeredEvents = await identity.queryFilter(
+      identity.filters.Registered()
+    );
+    if (registeredEvents.length > 0) {
+      // Pick the latest registered agent
+      const latest = registeredEvents[registeredEvents.length - 1];
+      const agentId = (latest as any).args.agentId || (latest as any).args[0];
+      log.info(`Found ${registeredEvents.length} agent(s) on-chain, using latest`);
+      return BigInt(agentId);
+    }
+  } catch (err: any) {
+    log.info(`On-chain query failed: ${err.message}`);
+  }
+
+  // Method 2: Fallback to local agent-info.json (for co-located dev)
+  log.info("No on-chain agents found, checking local agent-info.json...");
+  for (let i = 0; i < 10; i++) {
     if (fs.existsSync(AGENT_INFO_FILE)) {
       try {
         const info = JSON.parse(fs.readFileSync(AGENT_INFO_FILE, "utf-8"));
@@ -41,7 +59,7 @@ async function discoverAgentId(): Promise<bigint> {
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error("Agent not found — is the Provider running?");
+  throw new Error("No agents found — check RPC connection or register an agent first");
 }
 
 // ── A2A helpers ─────────────────────────────────────────────────
