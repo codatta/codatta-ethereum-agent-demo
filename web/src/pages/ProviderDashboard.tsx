@@ -21,6 +21,9 @@ export function ProviderDashboard() {
   const client = usePublicClient()
   const [agents, setAgents] = useState<MyAgent[]>([])
   const [loading, setLoading] = useState(true)
+  const { hidden, hideAgent, showAgent } = useHiddenAgents()
+  const [filter, setFilter] = useState<'visible' | 'hidden' | 'all'>('visible')
+  const [tab, setTab] = useState<'agents' | 'guide'>('agents')
 
   useEffect(() => {
     if (!client || !isConnected || !address) {
@@ -115,10 +118,6 @@ export function ProviderDashboard() {
     )
   }
 
-  const { hidden, hideAgent, showAgent } = useHiddenAgents()
-  const [filter, setFilter] = useState<'visible' | 'hidden' | 'all'>('visible')
-  const [tab, setTab] = useState<'agents' | 'guide'>('agents')
-
   if (loading) return <p>Loading your agents...</p>
 
   const filteredAgents = agents.filter(a => {
@@ -161,7 +160,7 @@ export function ProviderDashboard() {
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 16 }}>
-          {agents.map((agent) => {
+          {filteredAgents.map((agent) => {
             const reg = agent.registrationFile
             const services = reg?.services || []
             return (
