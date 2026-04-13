@@ -21,7 +21,7 @@ import {
 import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
 import { startAnnotationService } from "./annotation-service.js";
-import { provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL } from "../shared/config.js";
+import { provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri } from "../shared/config.js";
 import {
   DIDRegistryABI,
   IdentityRegistryABI, ValidationRegistryABI, ReputationRegistryABI,
@@ -265,7 +265,7 @@ async function main() {
       }
       log.step("Identity loaded");
       log.info("Agent ID:", agentId.toString());
-      log.info("Codatta DID:", `did:codatta:${codattaDid.toString(16)}`);
+      log.info("Codatta DID:", hexToDidUri(codattaDid.toString(16)));
       log.success("Identity verified on-chain");
     } catch {
       log.info("Saved identity invalid on current chain. Please re-enter.");
@@ -281,7 +281,7 @@ async function main() {
   // Write agent info for client/query
   fs.writeFileSync(AGENT_INFO_FILE, JSON.stringify({
     agentId: agentId.toString(),
-    did: `did:codatta:${codattaDid.toString(16)}`,
+    did: hexToDidUri(codattaDid.toString(16)),
   }));
 
   // ── Step 4: Start MCP Server ──────────────────────────────────

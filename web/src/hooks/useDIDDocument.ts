@@ -36,7 +36,9 @@ export function useDIDDocument(identifierHex: string | undefined) {
     async function fetch() {
       try {
         setLoading(true)
-        const identifier = BigInt(`0x${identifierHex}`)
+        // Accept both UUID (with dashes) and raw hex
+        const hex = identifierHex.replace(/-/g, '')
+        const identifier = BigInt(`0x${hex}`)
         const abi = parseAbi(didRegistryAbi as unknown as string[])
 
         const result = await client!.readContract({

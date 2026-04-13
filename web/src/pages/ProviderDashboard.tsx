@@ -6,6 +6,7 @@ import { addresses, identityRegistryAbi, reputationRegistryAbi, validationRegist
 import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 import { THEME, styles } from '../lib/theme'
+import { hexToDidUri } from '../config/env'
 
 interface MyAgent {
   agentId: bigint
@@ -200,7 +201,7 @@ export function ProviderDashboard() {
                   <div style={{ marginTop: 12, fontSize: 12 }}>
                     <span style={{ color: THEME.textMuted }}>DID: </span>
                     <Link to={`/did/${agent.didHex}`} style={{ fontFamily: 'monospace', color: THEME.accentBlue }}>
-                      did:codatta:{agent.didHex.slice(0, 16)}...
+                      {hexToDidUri(agent.didHex)}
                     </Link>
                   </div>
                 )}

@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { provider, addresses } from "../shared/config.js";
+import { provider, addresses, hexToDidUri } from "../shared/config.js";
 import {
   DIDRegistryABI, IdentityRegistryABI,
   ReputationRegistryABI, ValidationRegistryABI,
@@ -58,7 +58,7 @@ async function queryAgentInfo(agentId: bigint) {
   try {
     const didBytes = await identity.getMetadata(agentId, "codatta:did");
     const didIdentifier = ethers.AbiCoder.defaultAbiCoder().decode(["uint128"], didBytes)[0];
-    log.info("Codatta DID (metadata):", `did:codatta:${didIdentifier.toString(16)}`);
+    log.info("Codatta DID (metadata):", hexToDidUri(didIdentifier.toString(16)));
   } catch {
     log.info("Codatta DID (metadata): not set");
   }
@@ -74,7 +74,7 @@ async function queryDIDDocument(didIdentifier: bigint) {
   const kvAttrs = didDoc[3];
   const arrayAttrs = didDoc[4];
 
-  log.info("DID:", `did:codatta:${id.toString(16)}`);
+  log.info("DID:", hexToDidUri(id.toString(16)));
   log.info("Owner:", owner);
 
   if (controllers.length > 0) {

@@ -13,7 +13,7 @@ import { ethers } from "ethers";
 import express from "express";
 import fs from "fs";
 import path from "path";
-import { provider, getWallet, addresses } from "../shared/config.js";
+import { provider, getWallet, addresses, hexToDidUri } from "../shared/config.js";
 import * as log from "../shared/logger.js";
 
 log.setRole("invite-svc");
@@ -145,7 +145,7 @@ async function startEventListener() {
     const record = store.invites[n];
 
     if (record) {
-      record.clientDid = `did:codatta:${identifier.toString(16)}`;
+      record.clientDid = hexToDidUri(identifier.toString(16));
       record.claimed = true;
       record.claimedAt = new Date().toISOString();
       saveStore();

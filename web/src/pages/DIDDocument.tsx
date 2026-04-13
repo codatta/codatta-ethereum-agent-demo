@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useDIDDocument } from '../hooks/useDIDDocument'
 import { THEME, styles } from '../lib/theme'
+import { hexToDidUri } from '../config/env'
 
 export function DIDDocumentPage() {
   const { identifier } = useParams()
@@ -12,13 +13,13 @@ export function DIDDocumentPage() {
   return (
     <div>
       <Link to="/agents" style={{ fontSize: 13, color: THEME.textSecondary }}>&larr; Back</Link>
-      <h2>did:codatta:{doc.idHex}</h2>
+      <h2>{hexToDidUri(doc.idHex)}</h2>
 
       <section style={styles.section}>
         <h3>Identity</h3>
         <table style={styles.table}>
           <tbody>
-            <tr><td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>DID</td><td style={{ ...styles.td, ...styles.mono }}>did:codatta:{doc.idHex}</td></tr>
+            <tr><td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>DID</td><td style={{ ...styles.td, ...styles.mono }}>{hexToDidUri(doc.idHex)}</td></tr>
             <tr><td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>Owner</td><td style={{ ...styles.td, ...styles.mono }}>{doc.owner}</td></tr>
             {doc.controllers.length > 0 && (
               <tr><td style={{ ...styles.td, fontWeight: 'bold', width: 140 }}>Controllers</td><td style={{ ...styles.td, ...styles.mono }}>{doc.controllers.map(c => c.toString(16)).join(', ')}</td></tr>

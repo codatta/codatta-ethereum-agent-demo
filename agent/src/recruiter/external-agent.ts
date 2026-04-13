@@ -21,7 +21,7 @@ import {
   UserBuilder,
 } from "@a2a-js/sdk/server/express";
 import type { AgentCard } from "@a2a-js/sdk";
-import { provider, getWallet, addresses } from "../shared/config.js";
+import { provider, getWallet, addresses, hexToDidUri } from "../shared/config.js";
 import { IdentityRegistryABI, DIDRegistrarABI, DIDRegistryABI } from "../shared/abis.js";
 import * as log from "../shared/logger.js";
 
@@ -143,7 +143,7 @@ class ExternalAgentExecutor implements AgentExecutor {
         })
         .find((e: ethers.LogDescription | null) => e?.name === "DIDRegistered");
 
-      const codattaDid = `did:codatta:${didEvent!.args.identifier.toString(16)}`;
+      const codattaDid = hexToDidUri(didEvent!.args.identifier.toString(16));
       log.success(`Registered DID: ${codattaDid}`);
 
       this.conversationState.set(contextKey, "onboarded");

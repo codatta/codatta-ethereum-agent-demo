@@ -5,7 +5,7 @@ import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toH
 import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
 import { Link } from 'react-router-dom'
 import { THEME, styles } from '../lib/theme'
-import { ENV } from '../config/env'
+import { ENV, hexToDidUri, didUriToHex } from '../config/env'
 import { NetworkCheck } from '../components/NetworkCheck'
 
 const SERVICE_TYPES = [
@@ -87,7 +87,7 @@ export function RegisterAgent() {
             const hex = (did as bigint).toString(16)
             if (!cancelled) {
               setDetectedDid(hex)
-              setExistingDid(`did:codatta:${hex}`)
+              setExistingDid(hexToDidUri(hex))
             }
             return
           } catch {}
@@ -174,14 +174,14 @@ export function RegisterAgent() {
             <strong>{detectedDid ? 'Existing DID found' : 'I already have a Codatta DID'}</strong>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <input
-                placeholder="did:codatta:abc123..."
+                placeholder="did:codatta:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                 value={existingDid}
                 onChange={e => setExistingDid(e.target.value)}
                 style={{ ...styles.input, flex: 1 }}
               />
               <button
                 onClick={() => {
-                  const hex = existingDid.replace('did:codatta:', '')
+                  const hex = didUriToHex(existingDid)
                   if (hex) { setDidHex(hex); setStep('agent') }
                 }}
                 disabled={!existingDid}
@@ -263,7 +263,7 @@ export function RegisterAgent() {
 
         <div style={{ ...styles.card, marginBottom: 12 }}>
           <p style={{ margin: 0, fontSize: 13 }}>
-            <strong>DID:</strong> <span style={styles.mono}>did:codatta:{didHex}</span>
+            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
           </p>
           <p style={{ margin: '4px 0 0', fontSize: 13 }}>
             <strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}
@@ -297,7 +297,7 @@ export function RegisterAgent() {
                   serviceType: selectedService,
                   image: 'https://codatta.io/agents/default/avatar.png',
                   services: [
-                    { name: 'DID', endpoint: `did:codatta:${didHex}`, version: 'v1' },
+                    { name: 'DID', endpoint: hexToDidUri(didHex), version: 'v1' },
                   ],
                   active: false,
                   registrations: [],
@@ -330,7 +330,7 @@ export function RegisterAgent() {
 
                 // Link: DID → ERC-8004
                 const serviceEndpoint = JSON.stringify({
-                  id: `did:codatta:${didHex}#erc8004`,
+                  id: `${hexToDidUri(didHex)}#erc8004`,
                   type: 'ERC8004Agent',
                   serviceEndpoint: `eip155:${ENV.CHAIN_ID}:${addresses.identityRegistry}#${aid}`,
                 })
@@ -376,7 +376,7 @@ export function RegisterAgent() {
             <strong>Agent ID:</strong> <span style={{ ...styles.mono, userSelect: 'all' }}>{agentId}</span>
           </p>
           <p style={{ margin: '4px 0 0', fontSize: 13 }}>
-            <strong>DID:</strong> <span style={styles.mono}>did:codatta:{didHex}</span>
+            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
           </p>
         </div>
 
@@ -486,7 +486,7 @@ npm run start:provider
                       ...(webUrl ? [{ name: 'web', endpoint: webUrl }] : []),
                       { name: 'MCP', endpoint: mcpUrl, version: '2025-06-18' },
                       ...(a2aUrl ? [{ name: 'A2A', endpoint: a2aUrl, version: '0.3.0' }] : []),
-                      { name: 'DID', endpoint: `did:codatta:${didHex}`, version: 'v1' },
+                      { name: 'DID', endpoint: hexToDidUri(didHex), version: 'v1' },
                     ],
                     active: true,
                     registrations: [{ agentId, agentRegistry: addresses.identityRegistry }],
@@ -531,7 +531,7 @@ npm run start:provider
       <h2>Agent Created!</h2>
       <div style={{ ...styles.card, background: 'rgba(34,197,94,0.06)' }}>
         <p><strong>Agent ID:</strong> <span style={styles.mono}>{agentId}</span></p>
-        <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>did:codatta:{didHex}</Link></p>
+        <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>{hexToDidUri(didHex)}</Link></p>
         <p><strong>Name:</strong> {name}</p>
         <p><strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}</p>
         <p><strong>MCP:</strong> <span style={styles.mono}>{mcpUrl}</span></p>

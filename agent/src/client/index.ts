@@ -4,7 +4,7 @@ import path from "path";
 import readline from "readline";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { provider, getWallet, addresses } from "../shared/config.js";
+import { provider, getWallet, addresses, hexToDidUri } from "../shared/config.js";
 import {
   IdentityRegistryABI, ReputationRegistryABI, DIDRegistryABI, InviteRegistrarABI,
 } from "../shared/abis.js";
@@ -332,7 +332,7 @@ async function main() {
           })
           .find((e: ethers.LogDescription | null) => e?.name === "InviteRegistered");
 
-        clientDid = `did:codatta:${inviteEvent!.args.identifier.toString(16)}`;
+        clientDid = hexToDidUri(inviteEvent!.args.identifier.toString(16));
         log.success(`Registered DID: ${clientDid}`);
         log.info(`Invite attribution recorded on-chain (inviter: ${inviteData.inviter.slice(0, 10)}...)`);
       } else {

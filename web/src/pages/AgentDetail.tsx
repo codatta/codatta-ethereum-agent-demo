@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAgentDetail } from '../hooks/useAgentDetail'
 import { THEME, styles } from '../lib/theme'
+import { hexToDidUri } from '../config/env'
 
 export function AgentDetail() {
   const { agentId } = useParams()
@@ -123,7 +124,7 @@ export function AgentDetail() {
         <section style={styles.section}>
           <h3>Codatta DID</h3>
           <Link to={`/did/${detail.didIdentifier.toString(16)}`} style={{ ...styles.mono, fontSize: 13 }}>
-            did:codatta:{detail.didIdentifier.toString(16)}
+            {hexToDidUri(detail.didIdentifier.toString(16))}
           </Link>
         </section>
       )}

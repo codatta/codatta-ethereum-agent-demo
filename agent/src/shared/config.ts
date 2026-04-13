@@ -27,3 +27,10 @@ export const addresses = {
 
 export const PROVIDER_PORT = parseInt(process.env.PROVIDER_PORT || "4121");
 export const INVITE_SERVICE_URL = process.env.INVITE_SERVICE_URL || "http://127.0.0.1:4160";
+
+/** Convert uint128 hex to did:codatta:<uuid> format */
+export function hexToDidUri(hex: string): string {
+  const h = hex.replace(/^0x/, "").padStart(32, "0");
+  const uuid = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  return `did:codatta:${uuid}`;
+}

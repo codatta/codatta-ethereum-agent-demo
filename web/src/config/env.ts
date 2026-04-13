@@ -22,3 +22,16 @@ export const ENV = {
     a2a: parseInt(import.meta.env.VITE_DEFAULT_PORT_A2A || '4123'),
   },
 } as const
+
+/** Convert uint128 hex to did:codatta:<uuid> format */
+export function hexToDidUri(hex: string): string {
+  const h = hex.replace(/^0x/, '').padStart(32, '0')
+  const uuid = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`
+  return `did:codatta:${uuid}`
+}
+
+/** Parse did:codatta:<uuid> (or <hex>) to raw hex string */
+export function didUriToHex(did: string): string {
+  const body = did.replace(/^did:codatta:/, '').replace(/-/g, '').toLowerCase()
+  return body
+}
