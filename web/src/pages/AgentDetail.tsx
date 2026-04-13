@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAgentDetail } from '../hooks/useAgentDetail'
 import { THEME, styles } from '../lib/theme'
-import { hexToDidUri } from '../config/env'
+import { hexToDidUri, normalizeEndpoint } from '../config/env'
 
 export function AgentDetail() {
   const { agentId } = useParams()
@@ -55,11 +55,11 @@ export function AgentDetail() {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ ...styles.badge(THEME.accentBlue), minWidth: 40, textAlign: 'center' }}>{svc.name}</span>
                 <code style={{ ...styles.mono, fontSize: 12, color: THEME.textPrimary, flex: 1, wordBreak: 'break-all', userSelect: 'all' }}>
-                  {svc.endpoint}
+                  {normalizeEndpoint(svc.endpoint)}
                 </code>
                 {svc.version && <span style={{ fontSize: 11, color: THEME.textMuted }}>{svc.version}</span>}
                 <button
-                  onClick={() => navigator.clipboard.writeText(svc.endpoint)}
+                  onClick={() => navigator.clipboard.writeText(normalizeEndpoint(svc.endpoint))}
                   style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, padding: 0, flexShrink: 0 }}
                 >
                   Copy
@@ -156,7 +156,7 @@ export function AgentDetail() {
                     {services.map((svc, i) => (
                       <tr key={i}>
                         <td style={styles.td}>{svc.name}</td>
-                        <td style={{ ...styles.td, ...styles.mono, fontSize: 11, wordBreak: 'break-all' }}>{svc.endpoint}</td>
+                        <td style={{ ...styles.td, ...styles.mono, fontSize: 11, wordBreak: 'break-all' }}>{normalizeEndpoint(svc.endpoint)}</td>
                         <td style={styles.td}>{svc.version || '—'}</td>
                       </tr>
                     ))}

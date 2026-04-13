@@ -35,3 +35,13 @@ export function didUriToHex(did: string): string {
   const body = did.replace(/^did:codatta:/, '').replace(/-/g, '').toLowerCase()
   return body
 }
+
+/** Normalize an endpoint string — if it's a did:codatta: URI in hex form,
+ *  convert to UUID format. Otherwise return unchanged. */
+export function normalizeEndpoint(endpoint: string): string {
+  if (!endpoint.startsWith('did:codatta:')) return endpoint
+  const body = endpoint.replace(/^did:codatta:/, '')
+  if (body.includes('-')) return endpoint // already UUID format
+  if (!/^[0-9a-fA-F]+$/.test(body)) return endpoint // not plain hex
+  return hexToDidUri(body)
+}

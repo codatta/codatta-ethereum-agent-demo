@@ -6,7 +6,7 @@ import { addresses, identityRegistryAbi, reputationRegistryAbi, validationRegist
 import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 import { THEME, styles } from '../lib/theme'
-import { hexToDidUri } from '../config/env'
+import { hexToDidUri, normalizeEndpoint } from '../config/env'
 
 interface MyAgent {
   agentId: bigint
@@ -213,7 +213,10 @@ export function ProviderDashboard() {
                     <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
                       {services.map((svc, i) => (
                         <span key={i} style={{ fontSize: 11, padding: '2px 8px', background: THEME.canvas, borderRadius: THEME.radiusButton, fontFamily: 'monospace' }}>
-                          {svc.name}: {svc.endpoint.length > 30 ? svc.endpoint.slice(0, 30) + '...' : svc.endpoint}
+                          {svc.name}: {(() => {
+                            const ep = normalizeEndpoint(svc.endpoint)
+                            return ep.length > 30 ? ep.slice(0, 30) + '...' : ep
+                          })()}
                         </span>
                       ))}
                     </div>
