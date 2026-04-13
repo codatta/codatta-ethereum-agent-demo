@@ -24,10 +24,15 @@
 - [x] Web Dashboard — 服务目录、Provider 列表、Agent 详情、Provider Dashboard、Invites
 - [x] Web — Agent 屏蔽功能（hide/show via Invite Service API）
 - [x] Web — XNY 设计系统（Inter 字体、灰色画布、白色卡片、统一 token）
+- [x] Invite Service 数据持久化（invite-service-data.json）
+- [x] Client 先注册 ERC-8004 agentId（身份前置，含持久化）
+- [x] Client 从链上发现 Provider（排除自身，识别 MCP 服务）
+- [x] DID 格式统一为 did:codatta:\<uuid\>（UUID v4）
+- [x] x402 支付协议（Demo 版：EIP-712 签名 + 手工中间件，在 feat/x402-payment 分支）
 
 ### 待实现
 
-- [ ] **x402 真实支付** — 部署到 Base Sepolia，接入公共 facilitator，Client 需测试 USDC
+- [ ] **x402 真实支付** — 部署到 Base Sepolia，接入公共 facilitator，替换 Demo 版手工实现
 - [ ] **对接 Codatta 真实标注后端** — 替换 annotation-service.ts 的 mock，指向 Codatta Data Production System API
 
 ## Stage 2：生态聚合
@@ -62,7 +67,6 @@
 - [ ] **Invite Service 统一管理 Agent 列表** — Provider/Client 从 Invite Service 获取 agent 信息，去掉 agent-info.json 依赖。Web 注册和 Provider 程序注册统一入口
 - [ ] **Agent 活跃检测** — Services 页面过滤长期无活动的 Agent（后续，可能需要心跳机制或链上最后活跃时间）
 - [ ] **链上数据索引** — 当前从 block 0 遍历事件，生产环境需要索引服务（The Graph 或自建 indexer）
-- [ ] **Invite Service 数据持久化** — 当前邀请和隐藏记录存内存，重启丢失，需要持久化存储
 
 ## 代码整理
 
