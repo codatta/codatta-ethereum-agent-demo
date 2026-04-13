@@ -99,8 +99,8 @@ export function Invites() {
                   <td style={{ ...styles.td, ...styles.mono }}>{inv.clientAddress.slice(0, 10)}...</td>
                   <td style={styles.td}>
                     {inv.clientDid ? (
-                      <Link to={`/did/${inv.clientDid.replace('did:codatta:', '')}`} style={{ ...styles.mono }}>
-                        {inv.clientDid.slice(0, 32)}...
+                      <Link to={`/did/${inv.clientDid.replace('did:codatta:', '')}`} style={{ ...styles.mono, fontSize: 11 }}>
+                        {inv.clientDid}
                       </Link>
                     ) : (
                       <span style={{ color: THEME.textMuted }}>—</span>
