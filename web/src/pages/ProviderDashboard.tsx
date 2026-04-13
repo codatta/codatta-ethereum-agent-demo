@@ -22,7 +22,7 @@ export function ProviderDashboard() {
   const [agents, setAgents] = useState<MyAgent[]>([])
   const [loading, setLoading] = useState(true)
   const { hidden, hideAgent, showAgent } = useHiddenAgents()
-  const [filter, setFilter] = useState<'visible' | 'hidden' | 'all'>('visible')
+  const [filter, setFilter] = useState<'visible' | 'hidden' | 'inactive' | 'all'>('visible')
   const [tab, setTab] = useState<'agents' | 'guide'>('agents')
 
   useEffect(() => {
@@ -122,8 +122,10 @@ export function ProviderDashboard() {
 
   const filteredAgents = agents.filter(a => {
     const isHidden = hidden.has(a.agentId.toString())
-    if (filter === 'visible') return !isHidden
+    const isActive = a.registrationFile?.active === true
+    if (filter === 'visible') return !isHidden && isActive
     if (filter === 'hidden') return isHidden
+    if (filter === 'inactive') return !isHidden && !isActive
     return true
   })
 
@@ -144,7 +146,8 @@ export function ProviderDashboard() {
 
       {/* Filter */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <FilterButton label="Visible" active={filter === 'visible'} onClick={() => setFilter('visible')} count={agents.filter(a => !hidden.has(a.agentId.toString())).length} />
+        <FilterButton label="Visible" active={filter === 'visible'} onClick={() => setFilter('visible')} count={agents.filter(a => !hidden.has(a.agentId.toString()) && a.registrationFile?.active === true).length} />
+        <FilterButton label="Inactive" active={filter === 'inactive'} onClick={() => setFilter('inactive')} count={agents.filter(a => !hidden.has(a.agentId.toString()) && a.registrationFile?.active !== true).length} />
         <FilterButton label="Hidden" active={filter === 'hidden'} onClick={() => setFilter('hidden')} count={agents.filter(a => hidden.has(a.agentId.toString())).length} />
         <FilterButton label="All" active={filter === 'all'} onClick={() => setFilter('all')} count={agents.length} />
       </div>
@@ -152,7 +155,7 @@ export function ProviderDashboard() {
       {filteredAgents.length === 0 ? (
         <div style={{ ...styles.card, textAlign: 'center' }}>
           <p style={{ color: THEME.textMuted }}>
-            {filter === 'hidden' ? 'No hidden agents.' : filter === 'visible' ? 'No visible agents.' : 'No agents registered yet.'}
+            {filter === 'hidden' ? 'No hidden agents.' : filter === 'visible' ? 'No visible agents.' : filter === 'inactive' ? 'No inactive agents.' : 'No agents registered yet.'}
           </p>
           {agents.length === 0 && (
             <Link to="/register-agent" style={{ color: THEME.accentBlue }}>Register your first Agent</Link>
