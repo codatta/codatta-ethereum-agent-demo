@@ -2,6 +2,17 @@
 
 ## 展示流程
 
+### 0. Provider 注册（DID 优先）
+
+Provider（服务提供者）先注册身份、声明服务，最后注册 Agent ID。
+
+1. **注册 DID** — 通过 DIDRegistrar.register() 注册 Codatta DID（链上身份）
+2. **添加 Service 到 DID Document** — 将 MCP/A2A 服务端点写入 DID Document（代表在 Codatta 提供服务）
+3. **验证服务** — 验证 MCP 端点可用，工具完备（annotate, get_task_status）
+4. **注册 Agent ID** — 在 ERC-8004 IdentityRegistry 注册 agentId，填入已有 DID（不重复注册），建立双向链接
+
+Web Dashboard 和 Provider 程序都支持此流程。Provider 程序首次启动时可自动完成全部步骤。
+
 ### 1. Client 发现服务
 
 Agent 需要数据服务（如标注），去 ERC-8004 市场查找。

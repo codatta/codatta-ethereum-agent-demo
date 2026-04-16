@@ -184,11 +184,24 @@ async function main() {
   if (!agentIdStr) {
     try {
       const info = JSON.parse(fs.readFileSync(AGENT_INFO_FILE, "utf-8"));
-      agentIdStr = info.agentId;
-      log.info("Using agentId from agent-info.json");
-    } catch {
+      if (info.agentId) {
+        agentIdStr = info.agentId;
+        log.info("Using agentId from agent-info.json");
+      } else if (info.did) {
+        // DID-only mode: query DID document directly
+        log.info("Provider is in DID-only mode — querying DID document only");
+        const didHex = info.did.replace("did:codatta:", "").replace(/-/g, "");
+        const didIdentifier = BigInt(`0x${didHex}`);
+        await queryDIDDocument(didIdentifier);
+        log.info("Note: ERC-8004 queries (agent info, reputation, validation) require an agentId");
+        return;
+      } else {
+        throw new Error("No agentId or DID found in agent-info.json");
+      }
+    } catch (e: any) {
       console.error("Usage: tsx src/query/index.ts [agentId]");
       console.error("  Or run Provider first to generate agent-info.json");
+      if (e.message) console.error(`  (${e.message})`);
       process.exit(1);
     }
   }

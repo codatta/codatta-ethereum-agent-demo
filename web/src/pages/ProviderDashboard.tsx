@@ -1,29 +1,42 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAccount, usePublicClient } from 'wagmi'
-import { parseAbi, decodeEventLog, decodeAbiParameters } from 'viem'
-import { addresses, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
+import { useAccount, usePublicClient, useWriteContract } from 'wagmi'
+import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toHex, hexToString } from 'viem'
+import { addresses, didRegistryAbi, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
 import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 import { THEME, styles } from '../lib/theme'
-import { hexToDidUri, normalizeEndpoint } from '../config/env'
+import { ENV, hexToDidUri, normalizeEndpoint } from '../config/env'
 
 interface MyAgent {
-  agentId: bigint
+  // null for DID-only entries
+  agentId: bigint | null
+  // null only if ERC-8004 agent has no DID linked
+  didHex: string | null
   registrationFile: RegistrationFile | null
   reputationScore: number
   validationCount: number
-  didHex: string | null
+  // For DID-only: services parsed from DID document
+  didServices: Array<{ name: string; endpoint: string }>
+  // For DID-only: whether CodattaAgent metadata exists (discoverable)
+  hasMetadata?: boolean
 }
 
 export function ProviderDashboard() {
   const { address, isConnected } = useAccount()
   const client = usePublicClient()
+  const { writeContractAsync } = useWriteContract()
   const [agents, setAgents] = useState<MyAgent[]>([])
   const [loading, setLoading] = useState(true)
   const { hidden, hideAgent, showAgent } = useHiddenAgents()
   const [filter, setFilter] = useState<'visible' | 'hidden' | 'inactive' | 'all'>('visible')
   const [tab, setTab] = useState<'agents' | 'guide'>('agents')
+  const [bindingDid, setBindingDid] = useState<string | null>(null)
+  const [bindError, setBindError] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0)
+  const [boundResult, setBoundResult] = useState<{ didHex: string; agentId: string } | null>(null)
+  const [publishingDid, setPublishingDid] = useState<string | null>(null)
+  const [publishError, setPublishError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!client || !isConnected || !address) {
@@ -36,10 +49,11 @@ export function ProviderDashboard() {
       try {
         setLoading(true)
         const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
+        const didAbi = parseAbi(didRegistryAbi as unknown as string[])
         const repAbi = parseAbi(reputationRegistryAbi as unknown as string[])
         const valAbi = parseAbi(validationRegistryAbi as unknown as string[])
 
-        // Find agents owned by this wallet
+        // ── 1. Find ERC-8004 agents owned by this wallet ────────────
         const regEvent = identAbi.find(x => 'name' in x && x.name === 'Registered')!
         const logs = await client!.getLogs({
           address: addresses.identityRegistry,
@@ -48,6 +62,7 @@ export function ProviderDashboard() {
         })
 
         const myAgents: MyAgent[] = []
+        const linkedDids = new Set<string>()
 
         for (const log of logs) {
           const decoded = decodeEventLog({ abi: identAbi, data: log.data, topics: log.topics })
@@ -56,7 +71,7 @@ export function ProviderDashboard() {
 
           if (owner.toLowerCase() !== address!.toLowerCase()) continue
 
-          // Get registration file
+          // Registration file
           const tokenUri = await client!.readContract({
             address: addresses.identityRegistry, abi: identAbi,
             functionName: 'tokenURI', args: [agentId],
@@ -86,7 +101,7 @@ export function ProviderDashboard() {
             validationCount = valLogs.length
           } catch {}
 
-          // DID
+          // Linked DID
           let didHex: string | null = null
           try {
             const didBytes = await client!.readContract({
@@ -95,9 +110,64 @@ export function ProviderDashboard() {
             }) as `0x${string}`
             const [did] = decodeAbiParameters([{ type: 'uint128' }], didBytes)
             didHex = (did as bigint).toString(16)
+            linkedDids.add(didHex)
           } catch {}
 
-          myAgents.push({ agentId, registrationFile: regFile, reputationScore, validationCount, didHex })
+          myAgents.push({ agentId, didHex, registrationFile: regFile, reputationScore, validationCount, didServices: [] })
+        }
+
+        // ── 2. Find DIDs owned by this wallet (DID-only entries) ───
+        let ownedDids: bigint[] = []
+        try {
+          ownedDids = (await client!.readContract({
+            address: addresses.didRegistry, abi: didAbi,
+            functionName: 'getOwnedDids', args: [address!],
+          }) as readonly bigint[]).slice()
+        } catch {}
+
+        for (const didId of ownedDids) {
+          const didHex = didId.toString(16)
+          if (linkedDids.has(didHex)) continue // already counted as ERC-8004 agent
+
+          // Parse services from DID document
+          let didServices: Array<{ name: string; endpoint: string }> = []
+          let hasMetadata = false
+          try {
+            const docResult = await client!.readContract({
+              address: addresses.didRegistry, abi: didAbi,
+              functionName: 'getDidDocument', args: [didId],
+            }) as any
+            const arrayAttrs = docResult[4] as any[]
+            for (const attr of arrayAttrs) {
+              const name = attr[0] || attr.name
+              if (name !== 'service') continue
+              const values = attr[1] || attr.values || []
+              for (const item of values) {
+                const val = item[0] || item.value
+                const revoked = item[1] || item.revoked || false
+                if (revoked) continue
+                try {
+                  const text = hexToString(val)
+                  const parsed = JSON.parse(text)
+                  const type = parsed.type || ''
+                  if (type === 'CodattaAgent') { hasMetadata = true; continue }
+                  if (type === 'ERC8004Agent') continue
+                  const label = type === 'MCPServer' ? 'MCP' : type === 'A2AAgent' ? 'A2A' : type
+                  didServices.push({ name: label, endpoint: parsed.serviceEndpoint || '' })
+                } catch {}
+              }
+            }
+          } catch {}
+
+          myAgents.push({
+            agentId: null,
+            didHex,
+            registrationFile: null,
+            reputationScore: 0,
+            validationCount: 0,
+            didServices,
+            hasMetadata,
+          })
         }
 
         if (!cancelled) setAgents(myAgents)
@@ -107,7 +177,123 @@ export function ProviderDashboard() {
 
     fetch()
     return () => { cancelled = true }
-  }, [client, isConnected, address])
+  }, [client, isConnected, address, reloadTick])
+
+  async function bindAgentId(didHex: string) {
+    if (!client || !address) return
+    setBindingDid(didHex)
+    setBindError(null)
+    try {
+      const didIdentifier = BigInt(`0x${didHex}`)
+      const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
+      const didAbi = parseAbi(didRegistryAbi as unknown as string[])
+
+      // Build minimal registration file from DID services
+      const agent = agents.find(a => a.didHex === didHex)
+      const services = agent?.didServices || []
+      const regFile = {
+        type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+        name: `Codatta Agent`,
+        description: 'Agent registered via Codatta DID',
+        image: 'https://codatta.io/agents/default/avatar.png',
+        services: [
+          ...services,
+          { name: 'DID', endpoint: hexToDidUri(didHex), version: 'v1' },
+        ],
+        active: true,
+        registrations: [],
+        supportedTrust: ['reputation'], x402Support: true,
+      }
+      const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
+
+      // 1. Register on ERC-8004
+      const regHash = await writeContractAsync({
+        address: addresses.identityRegistry, abi: identAbi,
+        functionName: 'register', args: [tokenUri],
+      })
+      const regReceipt = await client.waitForTransactionReceipt({ hash: regHash })
+
+      let aid = 0n
+      for (const log of regReceipt.logs) {
+        try {
+          const decoded = decodeEventLog({ abi: identAbi, data: log.data, topics: log.topics })
+          if (decoded.eventName === 'Registered') { aid = (decoded.args as any).agentId as bigint; break }
+        } catch {}
+      }
+      if (!aid) throw new Error('Agent registration failed')
+
+      // 2. Link: ERC-8004 → DID (setMetadata)
+      const didBytes = encodeAbiParameters([{ type: 'uint128' }], [didIdentifier])
+      const bh2 = await writeContractAsync({
+        address: addresses.identityRegistry, abi: identAbi,
+        functionName: 'setMetadata', args: [aid, 'codatta:did', didBytes],
+      })
+      await client.waitForTransactionReceipt({ hash: bh2 })
+
+      // 3. Link: DID → ERC-8004 (addItemToAttribute)
+      const erc8004Service = JSON.stringify({
+        id: `${hexToDidUri(didHex)}#erc8004`,
+        type: 'ERC8004Agent',
+        serviceEndpoint: `eip155:${ENV.CHAIN_ID}:${addresses.identityRegistry}#${aid}`,
+      })
+      const bh3 = await writeContractAsync({
+        address: addresses.didRegistry, abi: didAbi,
+        functionName: 'addItemToAttribute',
+        args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(erc8004Service))],
+      })
+      await client.waitForTransactionReceipt({ hash: bh3 })
+
+      // 4. Update registration file with agentId
+      const finalRegFile = {
+        ...regFile,
+        registrations: [{ agentId: aid.toString(), agentRegistry: addresses.identityRegistry }],
+      }
+      const finalUri = `data:application/json;base64,${btoa(JSON.stringify(finalRegFile))}`
+      const bh4 = await writeContractAsync({
+        address: addresses.identityRegistry, abi: identAbi,
+        functionName: 'setAgentUri', args: [aid, finalUri],
+      })
+      await client.waitForTransactionReceipt({ hash: bh4 })
+
+      setBoundResult({ didHex, agentId: aid.toString() })
+      setReloadTick(t => t + 1)
+    } catch (err: any) {
+      setBindError(err.shortMessage || err.message)
+    } finally {
+      setBindingDid(null)
+    }
+  }
+
+  async function publishMetadata(didHex: string) {
+    if (!client) return
+    setPublishingDid(didHex)
+    setPublishError(null)
+    try {
+      const didIdentifier = BigInt(`0x${didHex}`)
+      const didAbi = parseAbi(didRegistryAbi as unknown as string[])
+      const codattaAgent = JSON.stringify({
+        id: `${hexToDidUri(didHex)}#codatta`,
+        type: 'CodattaAgent',
+        name: 'Codatta Annotation Agent',
+        description: 'Image annotation service by Codatta. Supports object detection, semantic segmentation, and classification.',
+        serviceType: 'annotation',
+        image: 'https://codatta.io/agents/default/avatar.png',
+        active: true,
+        supportedTrust: ['reputation'],
+        x402Support: true,
+      })
+      await writeContractAsync({
+        address: addresses.didRegistry, abi: didAbi,
+        functionName: 'addItemToAttribute',
+        args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(codattaAgent))],
+      })
+      setReloadTick(t => t + 1)
+    } catch (err: any) {
+      setPublishError(err.shortMessage || err.message)
+    } finally {
+      setPublishingDid(null)
+    }
+  }
 
   if (!isConnected) {
     return (
@@ -120,9 +306,14 @@ export function ProviderDashboard() {
 
   if (loading) return <p>Loading your agents...</p>
 
+  function agentKey(a: MyAgent): string {
+    return a.agentId ? `agent:${a.agentId}` : `did:${a.didHex}`
+  }
+
   const filteredAgents = agents.filter(a => {
-    const isHidden = hidden.has(a.agentId.toString())
-    const isActive = a.registrationFile?.active === true
+    const isHidden = hidden.has(agentKey(a))
+    // DID-only entries: treat as active
+    const isActive = a.agentId === null ? true : a.registrationFile?.active === true
     if (filter === 'visible') return !isHidden && isActive
     if (filter === 'hidden') return isHidden
     if (filter === 'inactive') return !isHidden && !isActive
@@ -136,6 +327,50 @@ export function ProviderDashboard() {
         <Link to="/register-agent" style={{ ...styles.btnPrimary, textDecoration: 'none' }}>+ New Agent</Link>
       </div>
 
+      {/* Post-bind: show instructions to enable ERC-8004 in the local provider */}
+      {boundResult && (
+        <div style={{ ...styles.card, marginBottom: 16, background: 'rgba(34,197,94,0.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <strong>Agent ID bound successfully</strong>
+              <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+                <span style={{ color: THEME.textMuted }}>Agent ID:</span>{' '}
+                <span style={styles.mono}>{boundResult.agentId}</span>
+                <button
+                  onClick={() => navigator.clipboard.writeText(boundResult.agentId)}
+                  style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, marginLeft: 8 }}
+                >
+                  Copy
+                </button>
+              </p>
+            </div>
+            <button
+              onClick={() => setBoundResult(null)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: THEME.textMuted, fontSize: 18 }}
+              title="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+
+          <p style={{ margin: '12px 0 6px', fontSize: 13, color: THEME.textSecondary }}>
+            To enable ERC-8004 features in your provider, run the following in the{' '}
+            <span style={styles.mono}>agent/</span> directory and restart:
+          </p>
+          <div style={{ position: 'relative' }}>
+            <pre style={{ ...styles.code, margin: 0, fontSize: 12, paddingRight: 60 }}>
+{`npm run set-agent-id ${boundResult.agentId}`}
+            </pre>
+            <button
+              onClick={() => navigator.clipboard.writeText(`npm run set-agent-id ${boundResult.agentId}`)}
+              style={{ position: 'absolute', top: 8, right: 8, border: 'none', background: 'rgba(255,255,255,0.12)', borderRadius: 4, padding: '4px 12px', cursor: 'pointer', fontSize: 13, color: 'rgba(255,255,255,0.6)' }}
+            >
+              copy
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Page tabs */}
       <div style={{ display: 'flex', gap: 0, borderBottom: `2px solid ${THEME.canvas}`, marginBottom: 20 }}>
         <TabBtn label="My Agents" active={tab === 'agents'} onClick={() => setTab('agents')} />
@@ -146,9 +381,9 @@ export function ProviderDashboard() {
 
       {/* Filter */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <FilterButton label="Visible" active={filter === 'visible'} onClick={() => setFilter('visible')} count={agents.filter(a => !hidden.has(a.agentId.toString()) && a.registrationFile?.active === true).length} />
-        <FilterButton label="Inactive" active={filter === 'inactive'} onClick={() => setFilter('inactive')} count={agents.filter(a => !hidden.has(a.agentId.toString()) && a.registrationFile?.active !== true).length} />
-        <FilterButton label="Hidden" active={filter === 'hidden'} onClick={() => setFilter('hidden')} count={agents.filter(a => hidden.has(a.agentId.toString())).length} />
+        <FilterButton label="Visible" active={filter === 'visible'} onClick={() => setFilter('visible')} count={agents.filter(a => !hidden.has(agentKey(a)) && (a.agentId === null || a.registrationFile?.active === true)).length} />
+        <FilterButton label="Inactive" active={filter === 'inactive'} onClick={() => setFilter('inactive')} count={agents.filter(a => !hidden.has(agentKey(a)) && a.agentId !== null && a.registrationFile?.active !== true).length} />
+        <FilterButton label="Hidden" active={filter === 'hidden'} onClick={() => setFilter('hidden')} count={agents.filter(a => hidden.has(agentKey(a))).length} />
         <FilterButton label="All" active={filter === 'all'} onClick={() => setFilter('all')} count={agents.length} />
       </div>
 
@@ -165,25 +400,31 @@ export function ProviderDashboard() {
         <div style={{ display: 'grid', gap: 16 }}>
           {filteredAgents.map((agent) => {
             const reg = agent.registrationFile
-            const services = reg?.services || []
+            const services = reg?.services || agent.didServices
+            const key = agentKey(agent)
+            const isDidOnly = agent.agentId === null
             return (
-              <div key={agent.agentId.toString()} style={styles.card}>
+              <div key={key} style={styles.card}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                   <div>
-                    <h3 style={{ margin: '0 0 4px' }}>{reg?.name || 'Unnamed Agent'}</h3>
-                    <p style={{ margin: 0, ...styles.mono, fontSize: 12, color: THEME.textMuted, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ userSelect: 'all' }}>ID: {agent.agentId.toString()}</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(agent.agentId.toString()) }}
-                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, padding: 0 }}
-                        title="Copy Agent ID"
-                      >
-                        Copy
-                      </button>
-                    </p>
+                    <h3 style={{ margin: '0 0 4px' }}>{reg?.name || (isDidOnly ? 'Codatta Agent (DID-only)' : 'Unnamed Agent')}</h3>
+                    {agent.agentId && (
+                      <p style={{ margin: 0, ...styles.mono, fontSize: 12, color: THEME.textMuted, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ userSelect: 'all' }}>ID: {agent.agentId.toString()}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(agent.agentId!.toString()) }}
+                          style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, padding: 0 }}
+                          title="Copy Agent ID"
+                        >
+                          Copy
+                        </button>
+                      </p>
+                    )}
                   </div>
-                  {hidden.has(agent.agentId.toString()) ? (
+                  {hidden.has(key) ? (
                     <span style={styles.badge(THEME.danger)}>Hidden</span>
+                  ) : isDidOnly ? (
+                    <span style={styles.badge(THEME.accentOrange)}>DID-only</span>
                   ) : reg?.active ? (
                     <span style={styles.badge(THEME.success)}>Active</span>
                   ) : (
@@ -225,20 +466,57 @@ export function ProviderDashboard() {
                   </div>
                 )}
 
+                {/* Warning if DID-only entry is missing CodattaAgent metadata */}
+                {isDidOnly && !agent.hasMetadata && (
+                  <div style={{ marginTop: 10, padding: 10, background: 'rgba(251,191,36,0.08)', borderRadius: THEME.radiusInput, fontSize: 12 }}>
+                    <strong style={{ color: THEME.accentOrange }}>Incomplete profile</strong>
+                    <span style={{ color: THEME.textSecondary, marginLeft: 6 }}>
+                      Missing metadata — agent won't appear in the Services list until you publish it.
+                    </span>
+                  </div>
+                )}
+
                 {/* Actions */}
-                <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
-                  <Link to={`/agent/${agent.agentId.toString()}`} style={styles.btnSecondary}>View Details</Link>
+                <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {agent.agentId && (
+                    <Link to={`/agent/${agent.agentId.toString()}`} style={styles.btnSecondary}>View Details</Link>
+                  )}
+                  {isDidOnly && agent.didHex && !agent.hasMetadata && (
+                    <button
+                      onClick={() => publishMetadata(agent.didHex!)}
+                      disabled={publishingDid === agent.didHex}
+                      style={{ ...styles.btnPrimary, opacity: publishingDid === agent.didHex ? 0.5 : 1 }}
+                    >
+                      {publishingDid === agent.didHex ? 'Publishing...' : 'Publish Metadata'}
+                    </button>
+                  )}
+                  {isDidOnly && agent.didHex && (
+                    <button
+                      onClick={() => bindAgentId(agent.didHex!)}
+                      disabled={bindingDid === agent.didHex}
+                      style={{ ...styles.btnPrimary, opacity: bindingDid === agent.didHex ? 0.5 : 1 }}
+                    >
+                      {bindingDid === agent.didHex ? 'Binding...' : 'Bind Agent ID (ERC-8004)'}
+                    </button>
+                  )}
                   <Link to="/invites" style={styles.btnSecondary}>View Invites</Link>
-                  {hidden.has(agent.agentId.toString()) ? (
-                    <button onClick={() => showAgent(agent.agentId.toString())} style={styles.btnSuccess}>
+                  {hidden.has(key) ? (
+                    <button onClick={() => showAgent(key)} style={styles.btnSuccess}>
                       Show in Services
                     </button>
                   ) : (
-                    <button onClick={() => hideAgent(agent.agentId.toString())} style={styles.btnDanger}>
+                    <button onClick={() => hideAgent(key)} style={styles.btnDanger}>
                       Hide from Services
                     </button>
                   )}
                 </div>
+
+                {bindError && bindingDid === null && agent.didHex && (
+                  <p style={{ margin: '8px 0 0', color: THEME.danger, fontSize: 12 }}>{bindError}</p>
+                )}
+                {publishError && publishingDid === null && agent.didHex && (
+                  <p style={{ margin: '8px 0 0', color: THEME.danger, fontSize: 12 }}>{publishError}</p>
+                )}
               </div>
             )
           })}

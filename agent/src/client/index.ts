@@ -77,7 +77,13 @@ async function discoverProviderId(excludeOwner: string): Promise<bigint> {
     if (fs.existsSync(AGENT_INFO_FILE)) {
       try {
         const info = JSON.parse(fs.readFileSync(AGENT_INFO_FILE, "utf-8"));
-        return BigInt(info.agentId);
+        if (info.agentId) {
+          return BigInt(info.agentId);
+        }
+        // Provider is in DID-only mode — no agentId to discover
+        log.info("Provider is in DID-only mode (no agentId). ERC-8004 discovery unavailable.");
+        log.info(`Provider DID: ${info.did || "unknown"}`);
+        break;
       } catch { /* not ready */ }
     }
     await new Promise((r) => setTimeout(r, 500));

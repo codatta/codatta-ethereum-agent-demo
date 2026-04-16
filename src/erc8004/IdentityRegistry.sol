@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {ERC721URIStorage, ERC721} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {DIDGenerator} from "./lib/DIDGenerator.sol";
+import {DIDGenerator} from "codatta-did/lib/DIDGenerator.sol";
 
 contract IdentityRegistry is ERC721URIStorage, Ownable {
     uint256 private _lastId = 0;

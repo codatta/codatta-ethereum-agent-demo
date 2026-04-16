@@ -3,9 +3,9 @@ pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {DIDRegistry} from "../src/did/DIDRegistry.sol";
-import {DIDRegistrar} from "../src/did/DIDRegistrar.sol";
-import {InviteRegistrar} from "../src/did/InviteRegistrar.sol";
+import {DIDRegistry} from "codatta-did/DIDRegistry.sol";
+import {DIDRegistrar} from "codatta-did/DIDRegistrar.sol";
+import {InviteRegistrar} from "codatta-did/InviteRegistrar.sol";
 import {IdentityRegistry} from "../src/erc8004/IdentityRegistry.sol";
 import {ReputationRegistry} from "../src/erc8004/ReputationRegistry.sol";
 import {ValidationRegistry} from "../src/erc8004/ValidationRegistry.sol";

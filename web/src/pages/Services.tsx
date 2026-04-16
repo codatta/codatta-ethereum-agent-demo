@@ -34,13 +34,20 @@ export function Services() {
   const { agents } = useAgentList()
   const { hidden } = useHiddenAgents()
 
+  function agentKey(a: typeof agents[0]): string {
+    return a.agentId ? `agent:${a.agentId}` : `did:${a.didHex}`
+  }
+
   function countAgents(type: string): number {
     return agents.filter(a => {
-      if (hidden.has(a.agentId.toString())) return false
-      if (a.registrationFile?.active === false) return false
-      const svcType = a.registrationFile?.serviceType
+      if (hidden.has(agentKey(a))) return false
+      // Active check: ERC-8004 via registrationFile, DID-only via didMeta
+      if (a.agentId && a.registrationFile?.active === false) return false
+      if (!a.agentId && a.didMeta?.active === false) return false
+      // Service type matching
+      const svcType = a.registrationFile?.serviceType || a.didMeta?.serviceType
       if (svcType) return svcType === type
-      // Fallback: description keyword matching for legacy agents
+      // Fallback: description keyword
       const desc = (a.description || '').toLowerCase()
       if (type === 'annotation') {
         return desc.includes('annotation') || desc.includes('label') || desc.includes('detection')

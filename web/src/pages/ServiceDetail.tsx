@@ -17,7 +17,9 @@ const SERVICE_INFO: Record<string, { name: string; description: string }> = {
 }
 
 interface AgentWithScore {
-  agentId: bigint
+  // null for DID-only providers
+  agentId: bigint | null
+  didHex: string | null
   owner: string
   name: string
   description: string
@@ -44,12 +46,17 @@ export function ServiceDetail() {
       setLoading(true)
       const repAbi = parseAbi(reputationRegistryAbi as unknown as string[])
 
+      function agentKey(a: typeof agents[0]): string {
+        return a.agentId ? `agent:${a.agentId}` : `did:${a.didHex}`
+      }
+
       // Filter agents: matching service type, not hidden, must be active
       const matched = agents.filter(a => {
-        if (hidden.has(a.agentId.toString())) return false
-        if (a.registrationFile?.active === false) return false
-        // Match by serviceType field, fallback to description keywords
-        const svcType = a.registrationFile?.serviceType
+        if (hidden.has(agentKey(a))) return false
+        if (a.agentId && a.registrationFile?.active === false) return false
+        if (!a.agentId && a.didMeta?.active === false) return false
+        // Service type matching
+        const svcType = a.registrationFile?.serviceType || a.didMeta?.serviceType
         if (svcType) return svcType === type
         const desc = (a.description || '').toLowerCase()
         if (type === 'annotation') {
@@ -60,27 +67,31 @@ export function ServiceDetail() {
 
       const withScores: AgentWithScore[] = []
       for (const agent of matched) {
+        // Reputation is only applicable to ERC-8004 agents
         let score = 0
-        try {
-          const s = await client!.readContract({
-            address: addresses.reputationRegistry, abi: repAbi,
-            functionName: 'getScore', args: [agent.agentId],
-          }) as bigint
-          score = Number(s)
-        } catch {}
+        if (agent.agentId) {
+          try {
+            const s = await client!.readContract({
+              address: addresses.reputationRegistry, abi: repAbi,
+              functionName: 'getScore', args: [agent.agentId],
+            }) as bigint
+            score = Number(s)
+          } catch {}
+        }
 
         withScores.push({
           agentId: agent.agentId,
+          didHex: agent.didHex,
           owner: agent.owner,
           name: agent.name,
           description: agent.description,
           reputationScore: score,
-          services: agent.registrationFile?.services || [],
-          x402Support: agent.registrationFile?.x402Support || false,
+          services: agent.registrationFile?.services || agent.didMeta?.services || [],
+          x402Support: agent.registrationFile?.x402Support || agent.didMeta?.x402Support || false,
         })
       }
 
-      // Sort by reputation descending
+      // Sort by reputation descending (null agentId = 0 score, end of list)
       withScores.sort((a, b) => b.reputationScore - a.reputationScore)
 
       if (!cancelled) {
@@ -134,11 +145,14 @@ export function ServiceDetail() {
               {rankedAgents.map((agent, rank) => {
                 const hasMCP = agent.services.some(s => s.name === 'MCP')
                 const hasA2A = agent.services.some(s => s.name === 'A2A')
+                const isDidOnly = agent.agentId === null
+                const key = isDidOnly ? `did:${agent.didHex}` : `agent:${agent.agentId}`
+                const linkTo = isDidOnly ? `/did/${agent.didHex}` : `/agent/${agent.agentId!.toString()}`
 
                 return (
                   <Link
-                    key={agent.agentId.toString()}
-                    to={`/agent/${agent.agentId.toString()}`}
+                    key={key}
+                    to={linkTo}
                     style={{ textDecoration: 'none', color: 'inherit' }}
                   >
                     <div style={styles.cardHover}>
@@ -153,6 +167,7 @@ export function ServiceDetail() {
                               {hasMCP && <Tag>MCP</Tag>}
                               {hasA2A && <Tag>A2A</Tag>}
                               {agent.x402Support && <Tag>x402</Tag>}
+                              {isDidOnly && <Tag>DID-only</Tag>}
                             </div>
                           </div>
                           <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>
@@ -161,7 +176,7 @@ export function ServiceDetail() {
                         </div>
                         <div style={{ textAlign: 'center', flexShrink: 0 }}>
                           <div style={{ fontSize: 24, fontWeight: 'bold', color: agent.reputationScore >= 80 ? THEME.success : agent.reputationScore >= 50 ? THEME.accentOrange : THEME.textMuted }}>
-                            {agent.reputationScore || '—'}
+                            {isDidOnly ? '—' : (agent.reputationScore || '—')}
                           </div>
                           <div style={{ fontSize: 11, color: THEME.textMuted }}>Reputation</div>
                         </div>

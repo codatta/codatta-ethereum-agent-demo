@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useWriteContract, usePublicClient } from 'wagmi'
 import { injected } from 'wagmi/connectors'
-import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toHex } from 'viem'
+import { parseAbi, decodeEventLog, encodeAbiParameters, toHex } from 'viem'
 import { addresses, didRegistrarAbi, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
 import { Link } from 'react-router-dom'
 import { THEME, styles } from '../lib/theme'
@@ -12,15 +12,59 @@ const SERVICE_TYPES = [
   { id: 'annotation', name: 'Data Annotation', description: 'Image labeling, object detection, segmentation, classification', requiredTools: ['annotate', 'get_task_status'] },
 ]
 
-type Step = 'service' | 'did' | 'agent' | 'verify' | 'done'
+type Step = 'did' | 'service' | 'verify' | 'publish' | 'done'
+
+// Form state persisted to localStorage (keyed by wallet address)
+type DraftState = {
+  step: Step
+  didHex: string
+  selectedService: string | null
+  name: string
+  description: string
+  baseUrl: string
+  webUrl: string
+  mcpUrl: string
+  a2aUrl: string
+}
+
+function draftKey(address: string | undefined) {
+  return address ? `register-agent-draft:${address.toLowerCase()}` : null
+}
+
+function loadDraft(address: string | undefined): Partial<DraftState> | null {
+  const key = draftKey(address)
+  if (!key) return null
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function saveDraft(address: string | undefined, draft: DraftState) {
+  const key = draftKey(address)
+  if (!key) return
+  try {
+    localStorage.setItem(key, JSON.stringify(draft))
+  } catch {}
+}
+
+function clearDraft(address: string | undefined) {
+  const key = draftKey(address)
+  if (!key) return
+  try {
+    localStorage.removeItem(key)
+  } catch {}
+}
 
 export function RegisterAgent() {
-  const { isConnected } = useAccount()
+  const { isConnected, address } = useAccount()
   const { connect } = useConnect()
   const client = usePublicClient()
   const { writeContractAsync } = useWriteContract()
 
-  const [step, setStep] = useState<Step>('service')
+  const [step, setStep] = useState<Step>('did')
   const [selectedService, setSelectedService] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -31,11 +75,54 @@ export function RegisterAgent() {
   const [didHex, setDidHex] = useState('')
   const [agentId, setAgentId] = useState('')
   const [existingDid, setExistingDid] = useState('')
-  const [detectedDid, setDetectedDid] = useState<string | null>(null)
-  const [detectingDid, setDetectingDid] = useState(false)
   const [verifyStatus, setVerifyStatus] = useState<'idle' | 'checking' | 'pass' | 'fail'>('idle')
   const [verifyError, setVerifyError] = useState('')
   const [txLoading, setTxLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [draftLoaded, setDraftLoaded] = useState(false)
+
+  // Load draft on mount / address change
+  useEffect(() => {
+    if (!address) return
+    const draft = loadDraft(address)
+    if (draft) {
+      if (draft.step) setStep(draft.step)
+      if (draft.didHex) setDidHex(draft.didHex)
+      if (draft.selectedService !== undefined) setSelectedService(draft.selectedService)
+      if (draft.name) setName(draft.name)
+      if (draft.description) setDescription(draft.description)
+      if (draft.baseUrl) setBaseUrl(draft.baseUrl)
+      if (draft.webUrl) setWebUrl(draft.webUrl)
+      if (draft.mcpUrl) setMcpUrl(draft.mcpUrl)
+      if (draft.a2aUrl) setA2aUrl(draft.a2aUrl)
+    }
+    setDraftLoaded(true)
+  }, [address])
+
+  // Persist draft on any change (after initial load)
+  useEffect(() => {
+    if (!draftLoaded || !address) return
+    // Don't persist terminal state
+    if (step === 'done') return
+    saveDraft(address, { step, didHex, selectedService, name, description, baseUrl, webUrl, mcpUrl, a2aUrl })
+  }, [draftLoaded, address, step, didHex, selectedService, name, description, baseUrl, webUrl, mcpUrl, a2aUrl])
+
+  function resetDraft() {
+    clearDraft(address)
+    setStep('did')
+    setDidHex('')
+    setSelectedService(null)
+    setName('')
+    setDescription('')
+    setBaseUrl('')
+    setWebUrl('')
+    setMcpUrl('')
+    setA2aUrl('')
+    setExistingDid('')
+    setVerifyStatus('idle')
+    setVerifyError('')
+    setError(null)
+  }
 
   function deriveEndpoints(base: string) {
     setBaseUrl(base)
@@ -53,52 +140,6 @@ export function RegisterAgent() {
     setVerifyStatus('idle')
     setVerifyError('')
   }
-  const [error, setError] = useState<string | null>(null)
-
-  const { address } = useAccount()
-
-  // Detect existing DID from on-chain agents owned by this wallet
-  useEffect(() => {
-    if (!client || !address || step !== 'did' || detectedDid) return
-    let cancelled = false
-
-    async function detect() {
-      setDetectingDid(true)
-      try {
-        const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
-        const regEvent = identAbi.find(x => 'name' in x && x.name === 'Registered')!
-        const logs = await client!.getLogs({
-          address: addresses.identityRegistry, event: regEvent,
-          fromBlock: 0n, toBlock: 'latest',
-        })
-
-        for (const log of logs) {
-          const decoded = decodeEventLog({ abi: identAbi, data: log.data, topics: log.topics })
-          const owner = (decoded.args as any).owner as string
-          if (owner.toLowerCase() !== address!.toLowerCase()) continue
-
-          const agentId = (decoded.args as any).agentId as bigint
-          try {
-            const didBytes = await client!.readContract({
-              address: addresses.identityRegistry, abi: identAbi,
-              functionName: 'getMetadata', args: [agentId, 'codatta:did'],
-            }) as `0x${string}`
-            const [did] = decodeAbiParameters([{ type: 'uint128' }], didBytes)
-            const hex = (did as bigint).toString(16)
-            if (!cancelled) {
-              setDetectedDid(hex)
-              setExistingDid(hexToDidUri(hex))
-            }
-            return
-          } catch {}
-        }
-      } catch {}
-      if (!cancelled) setDetectingDid(false)
-    }
-
-    detect()
-    return () => { cancelled = true }
-  }, [client, address, step, detectedDid])
 
   if (!isConnected) {
     return (
@@ -113,65 +154,21 @@ export function RegisterAgent() {
     )
   }
 
-  // ── Step 1: Select service type ─────────────────────────────
-  if (step === 'service') {
-    return (
-      <div>
-        <h2>New Agent</h2>
-        <NetworkCheck />
-        <StepIndicator current="service" />
-        <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>Choose the type of service your Agent will provide.</p>
-
-        <div style={{ display: 'grid', gap: 12 }}>
-          {SERVICE_TYPES.map(svc => (
-            <div
-              key={svc.id}
-              onClick={() => {
-                setSelectedService(svc.id)
-                setName(`Codatta ${svc.name} Agent`)
-                setDescription(svc.description)
-              }}
-              style={{
-                ...styles.card,
-                cursor: 'pointer',
-                border: selectedService === svc.id ? `2px solid ${THEME.accentBlue}` : '2px solid transparent',
-              }}
-            >
-              <strong>{svc.name}</strong>
-              <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>{svc.description}</p>
-              <p style={{ margin: '6px 0 0', fontSize: 12, color: THEME.textMuted }}>
-                Required MCP tools: {svc.requiredTools.map(t => <code key={t} style={{ marginRight: 4 }}>{t}</code>)}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        <button
-          onClick={() => selectedService && setStep('did')}
-          disabled={!selectedService}
-          style={{ ...styles.btnPrimary, marginTop: 20, opacity: selectedService ? 1 : 0.4 }}
-        >
-          Next
-        </button>
-      </div>
-    )
-  }
-
-  // ── Step 2: DID ─────────────────────────────────────────────
+  // ── Step 1: DID ────────────────────────────────────────────────
   if (step === 'did') {
     return (
       <div>
         <h2>New Agent</h2>
         <NetworkCheck />
-        <StepIndicator current="did" />
+        <StepIndicator current="did" onReset={resetDraft} />
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
-          Your Agent needs a Codatta DID. {detectedDid ? 'We found an existing DID for your wallet.' : 'If you already have one, enter it below.'}
+          First, register a Codatta DID. This is your on-chain identity for providing services.
         </p>
 
         <div style={{ display: 'grid', gap: 16, maxWidth: 500 }}>
-          {/* Detected / Existing DID */}
-          <div style={{ ...styles.card, border: detectedDid ? `2px solid ${THEME.success}` : undefined }}>
-            <strong>{detectedDid ? 'Existing DID found' : 'I already have a Codatta DID'}</strong>
+          {/* Use existing DID */}
+          <div style={styles.card}>
+            <strong>I already have a Codatta DID</strong>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <input
                 placeholder="did:codatta:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -182,19 +179,14 @@ export function RegisterAgent() {
               <button
                 onClick={() => {
                   const hex = didUriToHex(existingDid)
-                  if (hex) { setDidHex(hex); setStep('agent') }
+                  if (hex) { setDidHex(hex); setStep('service') }
                 }}
                 disabled={!existingDid}
                 style={{ ...styles.btnPrimary, opacity: existingDid ? 1 : 0.4, whiteSpace: 'nowrap' }}
               >
-                {detectedDid ? 'Use this DID' : 'Use DID'}
+                Use DID
               </button>
             </div>
-            {detectedDid && (
-              <p style={{ margin: '6px 0 0', fontSize: 12, color: THEME.success }}>
-                Auto-detected from your existing agents
-              </p>
-            )}
           </div>
 
           {/* Register new */}
@@ -222,7 +214,7 @@ export function RegisterAgent() {
                       if (decoded.eventName === 'DIDRegistered') {
                         const id = (decoded.args as any).identifier as bigint
                         setDidHex(id.toString(16))
-                        setStep('agent')
+                        setStep('service')
                         break
                       }
                     } catch {}
@@ -242,126 +234,147 @@ export function RegisterAgent() {
         </div>
 
         {error && <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}><p style={{ margin: 0, color: THEME.danger }}>{error}</p></div>}
+      </div>
+    )
+  }
 
-        <button onClick={() => setStep('service')} style={{ ...styles.btnSecondary, marginTop: 16 }}>
-          ← Back
+  // ── Step 2: Service — select type + endpoints + write to DID doc ─
+  if (step === 'service') {
+    const svc = SERVICE_TYPES.find(s => s.id === selectedService)
+
+    return (
+      <div>
+        <h2>New Agent</h2>
+        <NetworkCheck />
+        <StepIndicator current="service" onReset={resetDraft} />
+
+        <div style={{ ...styles.card, marginBottom: 16 }}>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
+          </p>
+        </div>
+
+        <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
+          Declare what service your Agent provides and add it to your DID document.
+        </p>
+
+        <div style={{ display: 'grid', gap: 16, maxWidth: 500 }}>
+          {/* Service type selection */}
+          <div>
+            <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Service Type</span>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {SERVICE_TYPES.map(s => (
+                <div
+                  key={s.id}
+                  onClick={() => {
+                    if (selectedService === s.id) {
+                      setSelectedService(null)
+                      setName('')
+                      setDescription('')
+                    } else {
+                      setSelectedService(s.id)
+                      setName(`Codatta ${s.name} Agent`)
+                      setDescription(s.description)
+                    }
+                  }}
+                  style={{
+                    ...styles.card,
+                    cursor: 'pointer',
+                    border: selectedService === s.id ? `2px solid ${THEME.accentBlue}` : '2px solid transparent',
+                  }}
+                >
+                  <strong>{s.name}</strong>
+                  <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>{s.description}</p>
+                  <p style={{ margin: '6px 0 0', fontSize: 12, color: THEME.textMuted }}>
+                    Required MCP tools: {s.requiredTools.map(t => <code key={t} style={{ marginRight: 4 }}>{t}</code>)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {selectedService && (
+            <>
+              {/* Agent info */}
+              <label>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Agent Name</span>
+                <input value={name} onChange={e => setName(e.target.value)} style={styles.input} />
+              </label>
+              <label>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Description</span>
+                <textarea value={description} onChange={e => setDescription(e.target.value)} style={{ ...styles.input, height: 80, resize: 'vertical' }} />
+              </label>
+
+              {/* Endpoint configuration */}
+              <label>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Base URL</span>
+                <input
+                  placeholder="http://your-server-ip"
+                  value={baseUrl}
+                  onChange={e => deriveEndpoints(e.target.value)}
+                  style={styles.input}
+                />
+                <p style={{ fontSize: 11, color: THEME.textMuted, margin: '4px 0 0' }}>
+                  Use a public IP or domain. Other endpoints are derived automatically.
+                </p>
+              </label>
+
+              {baseUrl && (
+                <>
+                  <label>
+                    <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>HTTP REST</span>
+                    <input value={webUrl} onChange={e => setWebUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
+                  </label>
+                  <label>
+                    <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>MCP</span>
+                    <input value={mcpUrl} onChange={e => setMcpUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
+                  </label>
+                  <label>
+                    <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>A2A</span>
+                    <input value={a2aUrl} onChange={e => setA2aUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
+                  </label>
+                </>
+              )}
+
+              {/* Proceed to verification (no on-chain writes yet) */}
+              <button
+                onClick={() => setStep('verify')}
+                disabled={!name || !mcpUrl}
+                style={{ ...styles.btnPrimary, opacity: !name || !mcpUrl ? 0.5 : 1 }}
+              >
+                Next: Verify Service
+              </button>
+              <p style={{ fontSize: 12, color: THEME.textMuted, margin: 0 }}>
+                We'll verify your MCP endpoint before writing anything on-chain.
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Demo download hint */}
+        {selectedService && (
+          <div style={{ ...styles.card, marginTop: 12, maxWidth: 500, background: THEME.accentBlueLight }}>
+            <p style={{ margin: 0, fontSize: 13 }}>
+              <strong>Don't have a service yet?</strong> Download and run the pre-built provider:
+            </p>
+            <pre style={{ ...styles.code, margin: '8px 0 0', fontSize: 11 }}>{`git clone <repo-url>
+cd agent && npm install
+cp .env.example .env && ./sync-env.sh
+npm run start:provider
+# MCP URL will be on port ${ENV.DEFAULT_PORTS.mcp}`}</pre>
+          </div>
+        )}
+
+        {error && <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}><p style={{ margin: 0, color: THEME.danger }}>{error}</p></div>}
+
+        <button onClick={() => setStep('did')} style={{ ...styles.btnSecondary, marginTop: 16 }}>
+          &larr; Back
         </button>
       </div>
     )
   }
 
-  // ── Step 3: Register ERC-8004 Agent ─────────────────────────
-  if (step === 'agent') {
-    return (
-      <div>
-        <h2>New Agent</h2>
-        <NetworkCheck />
-        <StepIndicator current="agent" />
-        <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
-          Register your agent on ERC-8004 and link it to your DID.
-        </p>
-
-        <div style={{ ...styles.card, marginBottom: 12 }}>
-          <p style={{ margin: 0, fontSize: 13 }}>
-            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
-          </p>
-          <p style={{ margin: '4px 0 0', fontSize: 13 }}>
-            <strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}
-          </p>
-        </div>
-
-        <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
-          <label>
-            <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Agent Name</span>
-            <input value={name} onChange={e => setName(e.target.value)} style={styles.input} />
-          </label>
-          <label>
-            <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Description</span>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} style={{ ...styles.input, height: 80, resize: 'vertical' }} />
-          </label>
-
-          <button
-            onClick={async () => {
-              if (!client) return
-              setTxLoading(true)
-              setError(null)
-              try {
-                const didIdentifier = BigInt(`0x${didHex}`)
-                const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
-                const didAbi = parseAbi(didRegistryAbi as unknown as string[])
-
-                // Register on ERC-8004 (no endpoints yet — will add after verification)
-                const regFile = {
-                  type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-                  name, description,
-                  serviceType: selectedService,
-                  image: 'https://codatta.io/agents/default/avatar.png',
-                  services: [
-                    { name: 'DID', endpoint: hexToDidUri(didHex), version: 'v1' },
-                  ],
-                  active: false,
-                  registrations: [],
-                  supportedTrust: ['reputation'], x402Support: true,
-                }
-                const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
-
-                const regHash = await writeContractAsync({
-                  address: addresses.identityRegistry, abi: identAbi,
-                  functionName: 'register', args: [tokenUri],
-                })
-                const regReceipt = await client.waitForTransactionReceipt({ hash: regHash })
-
-                let aid = 0n
-                for (const log of regReceipt.logs) {
-                  try {
-                    const decoded = decodeEventLog({ abi: identAbi, data: log.data, topics: log.topics })
-                    if (decoded.eventName === 'Registered') { aid = (decoded.args as any).agentId as bigint; break }
-                  } catch {}
-                }
-                if (!aid) throw new Error('Agent registration failed')
-                setAgentId(aid.toString())
-
-                // Link: ERC-8004 → DID
-                const didBytes = encodeAbiParameters([{ type: 'uint128' }], [didIdentifier])
-                await writeContractAsync({
-                  address: addresses.identityRegistry, abi: identAbi,
-                  functionName: 'setMetadata', args: [aid, 'codatta:did', didBytes],
-                })
-
-                // Link: DID → ERC-8004
-                const serviceEndpoint = JSON.stringify({
-                  id: `${hexToDidUri(didHex)}#erc8004`,
-                  type: 'ERC8004Agent',
-                  serviceEndpoint: `eip155:${ENV.CHAIN_ID}:${addresses.identityRegistry}#${aid}`,
-                })
-                await writeContractAsync({
-                  address: addresses.didRegistry, abi: didAbi,
-                  functionName: 'addItemToAttribute',
-                  args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(serviceEndpoint))],
-                })
-
-                setStep('verify')
-              } catch (err: any) {
-                setError(err.shortMessage || err.message)
-              } finally {
-                setTxLoading(false)
-              }
-            }}
-            disabled={txLoading || !name}
-            style={{ ...styles.btnPrimary, opacity: txLoading || !name ? 0.5 : 1 }}
-          >
-            {txLoading ? 'Registering (3 transactions)...' : 'Register Agent'}
-          </button>
-        </div>
-
-        {error && <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}><p style={{ margin: 0, color: THEME.danger }}>{error}</p></div>}
-
-        <button onClick={() => setStep('did')} style={{ ...styles.btnSecondary, marginTop: 16 }}>← Back</button>
-      </div>
-    )
-  }
-
-  // ── Step 4: Verify MCP URL ──────────────────────────────────
+  // ── Step 3: Verify MCP endpoints ───────────────────────────────
   if (step === 'verify') {
     const svc = SERVICE_TYPES.find(s => s.id === selectedService)
 
@@ -369,53 +382,23 @@ export function RegisterAgent() {
       <div>
         <h2>New Agent</h2>
         <NetworkCheck />
-        <StepIndicator current="verify" />
+        <StepIndicator current="verify" onReset={resetDraft} />
 
         <div style={{ ...styles.card, marginBottom: 16 }}>
           <p style={{ margin: 0, fontSize: 13 }}>
-            <strong>Agent ID:</strong> <span style={{ ...styles.mono, userSelect: 'all' }}>{agentId}</span>
+            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
           </p>
           <p style={{ margin: '4px 0 0', fontSize: 13 }}>
-            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
+            <strong>MCP:</strong> <span style={styles.mono}>{mcpUrl}</span>
           </p>
         </div>
 
         <p style={{ color: THEME.textSecondary, marginBottom: 16 }}>
-          Enter your service base URL. Other endpoints will be auto-derived. You can adjust them if needed.
+          Verify that your MCP service is running and exposes the required tools.
         </p>
 
         <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
-          <label>
-            <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Base URL</span>
-            <input
-              placeholder="http://your-server-ip"
-              value={baseUrl}
-              onChange={e => deriveEndpoints(e.target.value)}
-              style={styles.input}
-            />
-            <p style={{ fontSize: 11, color: THEME.textMuted, margin: '4px 0 0' }}>
-              Use a public IP or domain. Other endpoints are derived automatically.
-            </p>
-          </label>
-
-          {baseUrl && (
-            <>
-              <label>
-                <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>HTTP REST</span>
-                <input value={webUrl} onChange={e => setWebUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
-              </label>
-              <label>
-                <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>MCP</span>
-                <input value={mcpUrl} onChange={e => setMcpUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
-              </label>
-              <label>
-                <span style={{ display: 'block', fontSize: 12, color: THEME.textMuted, marginBottom: 2 }}>A2A</span>
-                <input value={a2aUrl} onChange={e => setA2aUrl(e.target.value)} style={{ ...styles.input, ...styles.mono, fontSize: 12 }} />
-              </label>
-            </>
-          )}
-
-          <p style={{ fontSize: 13, color: THEME.textMuted }}>
+          <p style={{ fontSize: 13, color: THEME.textMuted, margin: 0 }}>
             Required MCP tools: {svc?.requiredTools.map(t => <code key={t} style={{ marginRight: 4 }}>{t}</code>)}
           </p>
 
@@ -442,138 +425,328 @@ export function RegisterAgent() {
                 setVerifyError(err.message)
               }
             }}
-            disabled={!mcpUrl || verifyStatus === 'checking'}
-            style={{ ...styles.btnPrimary, opacity: !mcpUrl ? 0.4 : 1 }}
+            disabled={verifyStatus === 'checking'}
+            style={styles.btnPrimary}
           >
-            {verifyStatus === 'checking' ? 'Verifying...' : 'Verify Endpoints'}
+            {verifyStatus === 'checking' ? 'Verifying...' : 'Verify Service'}
           </button>
         </div>
 
-        {/* Demo download hint */}
-        <div style={{ ...styles.card, marginTop: 12, maxWidth: 500, background: THEME.accentBlueLight }}>
-          <p style={{ margin: 0, fontSize: 13 }}>
-            <strong>Don't have a service yet?</strong> Download and run the pre-built provider:
-          </p>
-          <pre style={{ ...styles.code, margin: '8px 0 0', fontSize: 11 }}>{`git clone <repo-url>
-cd agent && npm install
-cp .env.example .env && ./sync-env.sh
-npm run start:provider
-# MCP URL will be on port ${ENV.DEFAULT_PORTS.mcp}`}</pre>
-        </div>
-
         {verifyStatus === 'pass' && (
-          <div style={{ ...styles.card, marginTop: 16, background: 'rgba(34,197,94,0.06)' }}>
-            <p style={{ margin: 0, color: THEME.success, fontWeight: 600 }}>✅ Verification passed!</p>
+          <div style={{ ...styles.card, marginTop: 16, background: 'rgba(34,197,94,0.06)', maxWidth: 500 }}>
+            <p style={{ margin: 0, color: THEME.success, fontWeight: 600 }}>Verification passed!</p>
             <p style={{ margin: '8px 0 0', fontSize: 13, color: THEME.textSecondary }}>
-              Your MCP endpoint exposes all required tools. Click below to finalize registration.
+              Your MCP endpoint exposes all required tools. Publish the service to your DID document.
             </p>
             <button
-              onClick={async () => {
-                if (!client) return
-                setTxLoading(true)
-                setError(null)
-                try {
-                  const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
-                  const aid = BigInt(agentId)
-
-                  // Update registration file with MCP endpoint + set active
-                  const regFile = {
-                    type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-                    name, description,
-                    serviceType: selectedService,
-                    image: 'https://codatta.io/agents/default/avatar.png',
-                    services: [
-                      ...(webUrl ? [{ name: 'web', endpoint: webUrl }] : []),
-                      { name: 'MCP', endpoint: mcpUrl, version: '2025-06-18' },
-                      ...(a2aUrl ? [{ name: 'A2A', endpoint: a2aUrl, version: '0.3.0' }] : []),
-                      { name: 'DID', endpoint: hexToDidUri(didHex), version: 'v1' },
-                    ],
-                    active: true,
-                    registrations: [{ agentId, agentRegistry: addresses.identityRegistry }],
-                    supportedTrust: ['reputation'], x402Support: true,
-                  }
-                  const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
-                  await writeContractAsync({
-                    address: addresses.identityRegistry, abi: identAbi,
-                    functionName: 'setAgentUri', args: [aid, tokenUri],
-                  })
-
-                  setStep('done')
-                } catch (err: any) {
-                  setError(err.shortMessage || err.message)
-                } finally {
-                  setTxLoading(false)
-                }
-              }}
-              disabled={txLoading}
-              style={{ ...styles.btnPrimary, marginTop: 12, opacity: txLoading ? 0.6 : 1 }}
+              onClick={() => setStep('publish')}
+              style={{ ...styles.btnPrimary, marginTop: 12 }}
             >
-              {txLoading ? 'Finalizing...' : 'Finalize Registration'}
+              Next
             </button>
           </div>
         )}
 
         {verifyStatus === 'fail' && (
-          <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}>
-            <p style={{ margin: 0, color: THEME.danger, fontWeight: 600 }}>❌ Verification failed</p>
+          <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)', maxWidth: 500 }}>
+            <p style={{ margin: 0, color: THEME.danger, fontWeight: 600 }}>Verification failed</p>
             <p style={{ margin: '4px 0 0', fontSize: 13, color: THEME.textSecondary }}>{verifyError}</p>
           </div>
         )}
 
-        {error && <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}><p style={{ margin: 0, color: THEME.danger }}>{error}</p></div>}
+        <button onClick={() => setStep('service')} style={{ ...styles.btnSecondary, marginTop: 16 }}>
+          &larr; Back
+        </button>
       </div>
     )
   }
 
-  // ── Done ────────────────────────────────────────────────────
+  // ── Step 4: Publish Service to DID ─────────────────────────────
+  if (step === 'publish') {
+    return (
+      <div>
+        <h2>New Agent</h2>
+        <NetworkCheck />
+        <StepIndicator current="publish" onReset={resetDraft} />
+
+        <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
+          Publish your service endpoints to the DID document on-chain. This makes your Agent usable within Codatta.
+        </p>
+
+        <div style={{ ...styles.card, marginBottom: 16 }}>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+            <strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+            <strong>MCP:</strong> <span style={styles.mono}>{mcpUrl}</span>
+          </p>
+          {a2aUrl && (
+            <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+              <strong>A2A:</strong> <span style={styles.mono}>{a2aUrl}</span>
+            </p>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gap: 12, maxWidth: 500 }}>
+          <button
+            onClick={async () => {
+              if (!client) return
+              setTxLoading(true)
+              setError(null)
+              try {
+                const didIdentifier = BigInt(`0x${didHex}`)
+                const didAbi = parseAbi(didRegistryAbi as unknown as string[])
+
+                // 1. Write CodattaAgent metadata (name, description, serviceType) to DID document
+                //    This enables discovery via DID alone, without requiring ERC-8004.
+                const codattaAgent = JSON.stringify({
+                  id: `${hexToDidUri(didHex)}#codatta`,
+                  type: 'CodattaAgent',
+                  name, description,
+                  serviceType: selectedService,
+                  image: 'https://codatta.io/agents/default/avatar.png',
+                  active: true,
+                  supportedTrust: ['reputation'],
+                  x402Support: true,
+                })
+                const hash1 = await writeContractAsync({
+                  address: addresses.didRegistry, abi: didAbi,
+                  functionName: 'addItemToAttribute',
+                  args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(codattaAgent))],
+                })
+                await client.waitForTransactionReceipt({ hash: hash1 })
+
+                // 2. Write MCP service endpoint to DID document
+                const mcpService = JSON.stringify({
+                  id: `${hexToDidUri(didHex)}#mcp`,
+                  type: 'MCPServer',
+                  serviceEndpoint: mcpUrl,
+                })
+                const hash2 = await writeContractAsync({
+                  address: addresses.didRegistry, abi: didAbi,
+                  functionName: 'addItemToAttribute',
+                  args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(mcpService))],
+                })
+                await client.waitForTransactionReceipt({ hash: hash2 })
+
+                // 3. Write A2A service endpoint to DID document (if provided)
+                if (a2aUrl) {
+                  const a2aService = JSON.stringify({
+                    id: `${hexToDidUri(didHex)}#a2a`,
+                    type: 'A2AAgent',
+                    serviceEndpoint: a2aUrl,
+                  })
+                  const hash3 = await writeContractAsync({
+                    address: addresses.didRegistry, abi: didAbi,
+                    functionName: 'addItemToAttribute',
+                    args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(a2aService))],
+                  })
+                  await client.waitForTransactionReceipt({ hash: hash3 })
+                }
+
+                clearDraft(address)
+                setStep('done')
+              } catch (err: any) {
+                setError(err.shortMessage || err.message)
+              } finally {
+                setTxLoading(false)
+              }
+            }}
+            disabled={txLoading}
+            style={{ ...styles.btnPrimary, opacity: txLoading ? 0.5 : 1 }}
+          >
+            {txLoading ? `Publishing (${a2aUrl ? 3 : 2} tx)...` : `Publish to DID (${a2aUrl ? 3 : 2} tx)`}
+          </button>
+        </div>
+
+        {error && <div style={{ ...styles.card, marginTop: 16, background: 'rgba(239,68,68,0.04)' }}><p style={{ margin: 0, color: THEME.danger }}>{error}</p></div>}
+
+        <button onClick={() => setStep('verify')} style={{ ...styles.btnSecondary, marginTop: 16 }}>&larr; Back</button>
+      </div>
+    )
+  }
+
+  // ── Done ────────────────────────────────────────────────────────
   return (
     <div>
-      <h2>Agent Created!</h2>
+      <h2>Agent Published!</h2>
       <div style={{ ...styles.card, background: 'rgba(34,197,94,0.06)' }}>
-        <p><strong>Agent ID:</strong> <span style={styles.mono}>{agentId}</span></p>
         <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>{hexToDidUri(didHex)}</Link></p>
         <p><strong>Name:</strong> {name}</p>
         <p><strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}</p>
         <p><strong>MCP:</strong> <span style={styles.mono}>{mcpUrl}</span></p>
+        {agentId && (
+          <>
+            <p><strong>Agent ID (ERC-8004):</strong> <span style={styles.mono}>{agentId}</span></p>
+            <p style={{ margin: '8px 0', fontSize: 13, color: THEME.textSecondary }}>
+              To enable ERC-8004 in your provider, run in <span style={{ fontFamily: 'monospace' }}>agent/</span> and restart:
+            </p>
+            <div style={{ position: 'relative' }}>
+              <pre style={{ ...styles.code, margin: 0, fontSize: 12, paddingRight: 60 }}>{`npm run set-agent-id ${agentId}`}</pre>
+              <button
+                onClick={() => navigator.clipboard.writeText(`npm run set-agent-id ${agentId}`)}
+                style={{ position: 'absolute', top: 8, right: 8, border: 'none', background: 'rgba(255,255,255,0.12)', borderRadius: 4, padding: '4px 12px', cursor: 'pointer', fontSize: 13, color: 'rgba(255,255,255,0.6)' }}
+              >
+                copy
+              </button>
+            </div>
+          </>
+        )}
         <p style={{ margin: '12px 0 0', color: THEME.success }}>
-          ✅ Agent is active and discoverable on ERC-8004.
+          {agentId
+            ? 'Agent is active and discoverable via Codatta and ERC-8004.'
+            : 'Agent is active within Codatta. Register on ERC-8004 below to make it discoverable by external clients.'}
         </p>
         <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-          <Link to={`/agent/${agentId}`} style={{ ...styles.btnPrimary, textDecoration: 'none' }}>View Agent</Link>
+          {agentId && <Link to={`/agent/${agentId}`} style={{ ...styles.btnPrimary, textDecoration: 'none' }}>View Agent</Link>}
+          <Link to={`/did/${didHex}`} style={{ ...styles.btnSecondary, textDecoration: 'none' }}>View DID</Link>
           <Link to="/dashboard" style={{ ...styles.btnSecondary, textDecoration: 'none' }}>My Agents</Link>
         </div>
       </div>
+
+      {/* Optional: Register on ERC-8004 */}
+      {!agentId && (
+        <div style={{ ...styles.card, marginTop: 16, maxWidth: 600 }}>
+          <strong>Optional: Register on ERC-8004</strong>
+          <p style={{ margin: '4px 0 12px', fontSize: 13, color: THEME.textSecondary }}>
+            Adds an Agent ID on the ERC-8004 IdentityRegistry, linked to your DID.
+            This lets external clients discover and interact with your Agent via the ERC-8004 standard.
+          </p>
+          <button
+            onClick={async () => {
+              if (!client) return
+              setTxLoading(true)
+              setError(null)
+              try {
+                const didIdentifier = BigInt(`0x${didHex}`)
+                const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
+                const didAbi = parseAbi(didRegistryAbi as unknown as string[])
+
+                const regFile = {
+                  type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+                  name, description,
+                  serviceType: selectedService,
+                  image: 'https://codatta.io/agents/default/avatar.png',
+                  services: [
+                    ...(webUrl ? [{ name: 'web', endpoint: webUrl }] : []),
+                    { name: 'MCP', endpoint: mcpUrl, version: '2025-06-18' },
+                    ...(a2aUrl ? [{ name: 'A2A', endpoint: a2aUrl, version: '0.3.0' }] : []),
+                    { name: 'DID', endpoint: hexToDidUri(didHex), version: 'v1' },
+                  ],
+                  active: true,
+                  registrations: [],
+                  supportedTrust: ['reputation'], x402Support: true,
+                }
+                const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
+
+                // 1. Register on ERC-8004
+                const regHash = await writeContractAsync({
+                  address: addresses.identityRegistry, abi: identAbi,
+                  functionName: 'register', args: [tokenUri],
+                })
+                const regReceipt = await client.waitForTransactionReceipt({ hash: regHash })
+
+                let aid = 0n
+                for (const log of regReceipt.logs) {
+                  try {
+                    const decoded = decodeEventLog({ abi: identAbi, data: log.data, topics: log.topics })
+                    if (decoded.eventName === 'Registered') { aid = (decoded.args as any).agentId as bigint; break }
+                  } catch {}
+                }
+                if (!aid) throw new Error('Agent registration failed')
+
+                // 2. Link: ERC-8004 → DID (setMetadata)
+                const didBytes = encodeAbiParameters([{ type: 'uint128' }], [didIdentifier])
+                const h2 = await writeContractAsync({
+                  address: addresses.identityRegistry, abi: identAbi,
+                  functionName: 'setMetadata', args: [aid, 'codatta:did', didBytes],
+                })
+                await client.waitForTransactionReceipt({ hash: h2 })
+
+                // 3. Link: DID → ERC-8004 (addItemToAttribute)
+                const erc8004Service = JSON.stringify({
+                  id: `${hexToDidUri(didHex)}#erc8004`,
+                  type: 'ERC8004Agent',
+                  serviceEndpoint: `eip155:${ENV.CHAIN_ID}:${addresses.identityRegistry}#${aid}`,
+                })
+                const h3 = await writeContractAsync({
+                  address: addresses.didRegistry, abi: didAbi,
+                  functionName: 'addItemToAttribute',
+                  args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(erc8004Service))],
+                })
+                await client.waitForTransactionReceipt({ hash: h3 })
+
+                // 4. Update registration file with agentId in registrations array
+                const finalRegFile = {
+                  ...regFile,
+                  registrations: [{ agentId: aid.toString(), agentRegistry: addresses.identityRegistry }],
+                }
+                const finalUri = `data:application/json;base64,${btoa(JSON.stringify(finalRegFile))}`
+                const h4 = await writeContractAsync({
+                  address: addresses.identityRegistry, abi: identAbi,
+                  functionName: 'setAgentUri', args: [aid, finalUri],
+                })
+                await client.waitForTransactionReceipt({ hash: h4 })
+
+                setAgentId(aid.toString())
+              } catch (err: any) {
+                setError(err.shortMessage || err.message)
+              } finally {
+                setTxLoading(false)
+              }
+            }}
+            disabled={txLoading}
+            style={{ ...styles.btnPrimary, opacity: txLoading ? 0.5 : 1 }}
+          >
+            {txLoading ? 'Registering (4 transactions)...' : 'Register on ERC-8004 (4 transactions)'}
+          </button>
+          {error && <p style={{ margin: '12px 0 0', color: THEME.danger, fontSize: 13 }}>{error}</p>}
+        </div>
+      )}
     </div>
   )
 }
 
-function StepIndicator({ current }: { current: Step }) {
+function StepIndicator({ current, onReset }: { current: Step; onReset?: () => void }) {
   const steps: { key: Step; label: string }[] = [
-    { key: 'service', label: 'Service' },
     { key: 'did', label: 'DID' },
-    { key: 'agent', label: 'Register' },
+    { key: 'service', label: 'Service' },
     { key: 'verify', label: 'Verify' },
+    { key: 'publish', label: 'Publish' },
   ]
   const currentIdx = steps.findIndex(s => s.key === current)
 
   return (
-    <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
-      {steps.map((s, i) => (
-        <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div style={{
-            width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 12, fontWeight: 600,
-            background: i < currentIdx ? THEME.success : i === currentIdx ? THEME.btnPrimary : THEME.canvas,
-            color: i <= currentIdx ? THEME.surface : THEME.textMuted,
-          }}>
-            {i < currentIdx ? '✓' : i + 1}
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {steps.map((s, i) => (
+          <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div style={{
+              width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 600,
+              background: i < currentIdx ? THEME.success : i === currentIdx ? THEME.btnPrimary : THEME.canvas,
+              color: i <= currentIdx ? THEME.surface : THEME.textMuted,
+            }}>
+              {i < currentIdx ? '\u2713' : i + 1}
+            </div>
+            <span style={{ fontSize: 12, color: i === currentIdx ? THEME.textPrimary : THEME.textMuted, fontWeight: i === currentIdx ? 600 : 400 }}>
+              {s.label}
+            </span>
+            {i < steps.length - 1 && <span style={{ color: THEME.textMuted, margin: '0 4px' }}>&rarr;</span>}
           </div>
-          <span style={{ fontSize: 12, color: i === currentIdx ? THEME.textPrimary : THEME.textMuted, fontWeight: i === currentIdx ? 600 : 400 }}>
-            {s.label}
-          </span>
-          {i < steps.length - 1 && <span style={{ color: THEME.textMuted, margin: '0 4px' }}>→</span>}
-        </div>
-      ))}
+        ))}
+      </div>
+      {onReset && currentIdx > 0 && (
+        <button
+          onClick={onReset}
+          style={{ background: 'transparent', border: 'none', color: THEME.textMuted, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+        >
+          Start Over
+        </button>
+      )}
     </div>
   )
 }

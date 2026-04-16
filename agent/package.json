@@ -5,11 +5,15 @@
   "type": "module",
   "scripts": {
     "start:provider": "tsx src/provider/index.ts",
+    "set-agent-id": "tsx src/provider/set-agent-id.ts",
     "start:client": "tsx src/client/index.ts",
     "query": "tsx src/query/index.ts",
     "start:invite-service": "tsx src/invite-service/index.ts",
     "start:recruiter": "tsx src/recruiter/index.ts",
-    "start:external": "tsx src/recruiter/external-agent.ts"
+    "start:external": "tsx src/recruiter/external-agent.ts",
+    "reset:provider": "rm -f provider-identity.json agent-info.json && echo 'Provider identity cleared'",
+    "reset:client": "rm -f client-identity.json && echo 'Client identity cleared'",
+    "reset:all": "rm -f provider-identity.json agent-info.json client-identity.json invite-service-data.json && echo 'All local state cleared'"
   },
   "dependencies": {
     "@a2a-js/sdk": "^0.3.13",

@@ -16,6 +16,8 @@ export const didRegistrarAbi = [
 export const didRegistryAbi = [
   'function addItemToAttribute(uint128 identifier, uint128 operator, string name, bytes value) external',
   'function getDidDocument(uint128 identifier) external view returns (uint128 id, address owner, uint128[] controller, (string name, bytes value)[] kvAttributes, (string name, (bytes value, bool revoked)[] values)[] arrayAttributes)',
+  'function ownerOf(uint128 identifier) external view returns (address)',
+  'function getOwnedDids(address account) external view returns (uint128[])',
   'event DIDRegistered(uint128 identifier, address owner)',
 ] as const
 

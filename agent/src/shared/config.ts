@@ -5,7 +5,7 @@ const network = process.env.NETWORK || "local";
 
 const rpcUrl =
   network === "local"
-    ? process.env.LOCAL_RPC_URL || "http://127.0.0.1:8086"
+    ? process.env.LOCAL_RPC_URL || "http://127.0.0.1:8545"
     : process.env.SEPOLIA_RPC_URL!;
 
 export const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
@@ -25,8 +25,8 @@ export const addresses = {
   validationRegistry: process.env.VALIDATION_REGISTRY!,
 };
 
-export const PROVIDER_PORT = parseInt(process.env.PROVIDER_PORT || "4121");
-export const INVITE_SERVICE_URL = process.env.INVITE_SERVICE_URL || "http://127.0.0.1:4160";
+export const PROVIDER_PORT = parseInt(process.env.PROVIDER_PORT || "4021");
+export const INVITE_SERVICE_URL = process.env.INVITE_SERVICE_URL || "http://127.0.0.1:4060";
 
 /** Convert uint128 hex to did:codatta:<uuid> format */
 export function hexToDidUri(hex: string): string {
