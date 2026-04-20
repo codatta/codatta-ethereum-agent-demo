@@ -1,10 +1,11 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useDIDDocument } from '../hooks/useDIDDocument'
 import { THEME, styles } from '../lib/theme'
 import { hexToDidUri } from '../config/env'
 
 export function DIDDocumentPage() {
   const { identifier } = useParams()
+  const navigate = useNavigate()
   const { doc, loading } = useDIDDocument(identifier)
 
   if (loading) return <p>Loading DID Document...</p>
@@ -12,7 +13,7 @@ export function DIDDocumentPage() {
 
   return (
     <div>
-      <Link to="/agents" style={{ fontSize: 13, color: THEME.textSecondary }}>&larr; Back</Link>
+      <span onClick={() => navigate(-1)} style={{ fontSize: 13, color: THEME.textSecondary, cursor: 'pointer' }}>&larr; Back</span>
       <h2>{hexToDidUri(doc.idHex)}</h2>
 
       <section style={styles.section}>

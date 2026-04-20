@@ -33,6 +33,7 @@
 ### 待实现
 
 - [ ] **x402 真实支付** — 部署到 Base Sepolia，接入公共 facilitator，替换 Demo 版手工实现
+- [ ] **接入 x402 Bazaar** — 将 Agent 的 MCP/REST 付费端点发布到 x402 Bazaar，让外部消费方能在 Bazaar 发现并直接付费调用
 - [ ] **对接 Codatta 真实标注后端** — 替换 annotation-service.ts 的 mock，指向 Codatta Data Production System API
 
 ## Stage 2：生态聚合

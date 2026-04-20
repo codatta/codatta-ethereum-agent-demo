@@ -65,7 +65,7 @@ export function useAgentList() {
               address: addresses.identityRegistry, abi: identAbi,
               functionName: 'tokenURI', args: [agentId],
             }) as string
-            regFile = parseRegistrationFile(tokenUri)
+            regFile = await parseRegistrationFile(tokenUri)
           } catch {}
 
           // Find linked DID
@@ -103,7 +103,8 @@ export function useAgentList() {
           const didHex = didId.toString(16)
           if (linkedDids.has(didHex)) continue // already counted as ERC-8004 agent
 
-          // Parse DID document for CodattaAgent + service entries
+          // DID document holds only identity + pointers. Profile data (name/desc/services)
+          // lives in the #profile service entry's URL, fetched as ERC-8004 registrationFile.
           let meta: DidAgentMeta | null = null
           let currentOwner = ''
           try {
@@ -115,12 +116,7 @@ export function useAgentList() {
             if (currentOwner === '0x0000000000000000000000000000000000000000') continue
 
             const arrayAttrs = doc[4] as any[]
-            let name = ''
-            let description = ''
-            let serviceType: string | null = null
-            let active = true
-            let x402Support = false
-            const services: Array<{ name: string; endpoint: string }> = []
+            let profileUrl: string | null = null
 
             for (const attr of arrayAttrs) {
               const attrName = attr[0] || attr.name
@@ -133,26 +129,28 @@ export function useAgentList() {
                 try {
                   const text = hexToString(val)
                   const parsed = JSON.parse(text)
-                  const type = parsed.type || ''
-                  if (type === 'CodattaAgent') {
-                    name = parsed.name || ''
-                    description = parsed.description || ''
-                    serviceType = parsed.serviceType || null
-                    active = parsed.active !== false
-                    x402Support = parsed.x402Support === true
-                  } else if (type === 'ERC8004Agent') {
-                    continue
-                  } else {
-                    const label = type === 'MCPServer' ? 'MCP' : type === 'A2AAgent' ? 'A2A' : type
-                    services.push({ name: label, endpoint: parsed.serviceEndpoint || '' })
+                  if (parsed.type === 'AgentProfile' && parsed.serviceEndpoint) {
+                    profileUrl = parsed.serviceEndpoint
                   }
                 } catch {}
               }
             }
 
-            // Must have at least a CodattaAgent entry OR services to be a valid provider
-            if (name || services.length > 0) {
-              meta = { name, description, serviceType, active, x402Support, services }
+            if (profileUrl) {
+              const profile = await parseRegistrationFile(profileUrl)
+              if (profile) {
+                const services = (profile.services || [])
+                  .filter(s => s.name !== 'DID' && s.name !== 'web')
+                  .map(s => ({ name: s.name, endpoint: s.endpoint }))
+                meta = {
+                  name: profile.name || '',
+                  description: profile.description || '',
+                  serviceType: profile.serviceType || null,
+                  active: profile.active !== false,
+                  x402Support: profile.x402Support === true,
+                  services,
+                }
+              }
             }
           } catch {}
 

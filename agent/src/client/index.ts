@@ -4,7 +4,25 @@ import path from "path";
 import readline from "readline";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { provider, getWallet, addresses, hexToDidUri } from "../shared/config.js";
+import { provider, getWallet, addresses, hexToDidUri, X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS } from "../shared/config.js";
+
+/**
+ * Fetch ERC-8004 registrationFile from a tokenURI.
+ * Supports both legacy inline base64 and modern URL pointers.
+ */
+async function fetchRegistrationFile(uri: string): Promise<Record<string, unknown>> {
+  if (uri.startsWith("data:application/json;base64,")) {
+    const base64 = uri.replace("data:application/json;base64,", "");
+    return JSON.parse(Buffer.from(base64, "base64").toString());
+  }
+  if (uri.startsWith("http://") || uri.startsWith("https://")) {
+    const res = await fetch(uri);
+    if (!res.ok) throw new Error(`tokenURI fetch failed: HTTP ${res.status}`);
+    return await res.json() as Record<string, unknown>;
+  }
+  return {};
+}
+import { wrapFetchWithX402, type X402Config } from "../shared/x402.js";
 import {
   IdentityRegistryABI, ReputationRegistryABI, DIDRegistryABI, InviteRegistrarABI,
 } from "../shared/abis.js";
@@ -18,7 +36,6 @@ const didRegistry = new ethers.Contract(addresses.didRegistry, DIDRegistryABI, p
 const inviteRegistrar = new ethers.Contract(addresses.inviteRegistrar, InviteRegistrarABI, wallet);
 const reputation = new ethers.Contract(addresses.reputationRegistry, ReputationRegistryABI, wallet);
 
-const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
 const CLIENT_IDENTITY_FILE = path.join(import.meta.dirname, "../../client-identity.json");
 
 function loadClientIdentity(): { agentId?: string; chainId?: number } | null {
@@ -45,57 +62,46 @@ function askUser(question: string): Promise<string> {
 }
 
 async function discoverProviderId(excludeOwner: string): Promise<bigint> {
-  // Method 1: Query on-chain Registered events, find a provider (not ourselves)
+  // Discovery is pure on-chain: query IdentityRegistry for 8004 agents whose
+  // registrationFile advertises an MCP service endpoint. Providers that haven't
+  // registered on ERC-8004 are not discoverable through this path — by design.
   log.info("Querying ERC-8004 IdentityRegistry for providers...");
-  try {
-    const registeredEvents = await identity.queryFilter(
-      identity.filters.Registered()
-    );
-    // Iterate from newest to oldest, skip agents owned by us
-    for (let i = registeredEvents.length - 1; i >= 0; i--) {
-      const evt = registeredEvents[i] as any;
-      const id = BigInt(evt.args.agentId || evt.args[0]);
-      const owner = evt.args.owner || evt.args[2];
-      if (owner.toLowerCase() === excludeOwner.toLowerCase()) continue;
+  const registeredEvents = await identity.queryFilter(
+    identity.filters.Registered()
+  );
 
-      // Check if it has MCP service (i.e. it's a provider)
-      try {
-        const uri = await identity.tokenURI(id);
-        if (uri.includes("MCP")) {
-          log.info(`Found provider: agentId=${id} (${registeredEvents.length} total agents on-chain)`);
-          return id;
-        }
-      } catch {}
+  let totalScanned = 0;
+  for (let i = registeredEvents.length - 1; i >= 0; i--) {
+    const evt = registeredEvents[i] as any;
+    const id = BigInt(evt.args.agentId || evt.args[0]);
+    const owner = evt.args.owner || evt.args[2];
+    if (owner.toLowerCase() === excludeOwner.toLowerCase()) continue;
+    totalScanned++;
+
+    try {
+      const uri = await identity.tokenURI(id);
+      const regFile = await fetchRegistrationFile(uri);
+      const services = (regFile.services || []) as Array<{ name: string }>;
+      if (services.some(s => s.name === "MCP")) {
+        log.info(`Found provider: agentId=${id} (${registeredEvents.length} total agents on-chain)`);
+        return id;
+      }
+    } catch {
+      // tokenURI fetch or parse failed — skip this agent
     }
-  } catch (err: any) {
-    log.info(`On-chain query failed: ${err.message}`);
   }
 
-  // Method 2: Fallback to local agent-info.json (for co-located dev)
-  log.info("No providers found on-chain, checking local agent-info.json...");
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(AGENT_INFO_FILE)) {
-      try {
-        const info = JSON.parse(fs.readFileSync(AGENT_INFO_FILE, "utf-8"));
-        if (info.agentId) {
-          return BigInt(info.agentId);
-        }
-        // Provider is in DID-only mode — no agentId to discover
-        log.info("Provider is in DID-only mode (no agentId). ERC-8004 discovery unavailable.");
-        log.info(`Provider DID: ${info.did || "unknown"}`);
-        break;
-      } catch { /* not ready */ }
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error("No providers found — check RPC connection or register a provider first");
+  throw new Error(
+    `No ERC-8004 providers found with MCP service (scanned ${totalScanned} agents). ` +
+    `Register a provider on ERC-8004 first.`
+  );
 }
 
 // ── A2A helpers ─────────────────────────────────────────────────
 let rpcId = 1;
 const A2A_CONTEXT = `client-ctx-${Date.now()}`;
 
-async function a2aSend(url: string, taskId: string | undefined, parts: any[]): Promise<any> {
+async function a2aSend(xFetch: (url: string, init?: RequestInit) => Promise<Response>, url: string, taskId: string | undefined, parts: any[]): Promise<any> {
   const body = {
     jsonrpc: "2.0",
     id: rpcId++,
@@ -110,7 +116,7 @@ async function a2aSend(url: string, taskId: string | undefined, parts: any[]): P
       },
     },
   };
-  const res = await fetch(url, {
+  const res = await xFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -142,6 +148,19 @@ async function main() {
   const network = await provider.getNetwork();
   log.header(`Client Agent — Chain ${network.chainId}`);
   log.info("Address:", wallet.address);
+
+  // x402 payment wrapper — auto-retries HTTP calls with signed payment on 402
+  // payTo is overridden by server's payTo in 402 response, so placeholder is fine
+  const networkName = Number(network.chainId) === 31337 ? "Local" : "Sepolia";
+  const x402Config: X402Config = {
+    enabled: X402_ENABLED,
+    pricePerImageUsd: USDC_PRICE_PER_IMAGE,
+    payTo: wallet.address, // placeholder; server overrides in 402 response
+    chainId: Number(network.chainId),
+    usdcAddress: USDC_ADDRESS,
+    networkName,
+  };
+  const x402Fetch = wrapFetchWithX402(wallet, x402Config);
 
   // ── Step 1: Register Client on ERC-8004 ──────────────────────
   log.step("Registering client identity (ERC-8004)");
@@ -197,11 +216,7 @@ async function main() {
   const agentURI = await identity.tokenURI(agentId);
   const providerAddr = await identity.ownerOf(agentId) as string;
 
-  let registrationFile: Record<string, unknown> = {};
-  if (agentURI.startsWith("data:application/json;base64,")) {
-    const base64 = agentURI.replace("data:application/json;base64,", "");
-    registrationFile = JSON.parse(Buffer.from(base64, "base64").toString());
-  }
+  const registrationFile = await fetchRegistrationFile(agentURI);
 
   log.info("Agent name:", (registrationFile.name as string) || "unknown");
 
@@ -227,7 +242,7 @@ async function main() {
     log.info("Skills:", card.skills?.map((s: any) => s.name).join(", "));
 
     // Ask about services
-    const result1 = await a2aSend(a2aUrl, undefined, [{
+    const result1 = await a2aSend(x402Fetch, a2aUrl, undefined, [{
       type: "text",
       text: "Hi, I need image annotation for autonomous driving data. What do you offer?",
     }]);
@@ -235,7 +250,7 @@ async function main() {
     log.info("Provider:", getAgentText(result1).slice(0, 120) + "...");
 
     // Request invite code
-    const result2 = await a2aSend(a2aUrl, taskId, [
+    const result2 = await a2aSend(x402Fetch, a2aUrl, taskId, [
       { type: "text", text: "Yes, I'd like an invite code for free annotations." },
       { type: "data", data: { clientAddress: wallet.address } },
     ]);
@@ -250,7 +265,7 @@ async function main() {
 
       // Go straight to MCP annotate
       const mcpClient = new Client({ name: "codatta-client", version: "1.0.0" });
-      const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint));
+      const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint), { fetch: x402Fetch });
       await mcpClient.connect(transport);
 
       const { tools } = await mcpClient.listTools();
@@ -349,7 +364,7 @@ async function main() {
       log.step(accepted ? "Requesting annotation" : "Requesting annotation (paid mode)");
 
       const mcpClient = new Client({ name: "codatta-client", version: "1.0.0" });
-      const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint));
+      const transport = new StreamableHTTPClientTransport(new URL(mcpService.endpoint), { fetch: x402Fetch });
       await mcpClient.connect(transport);
 
       const { tools } = await mcpClient.listTools();

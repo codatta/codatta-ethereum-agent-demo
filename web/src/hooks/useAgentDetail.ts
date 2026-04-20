@@ -55,7 +55,7 @@ export function useAgentDetail(agentId: string | undefined) {
           functionName: 'tokenURI', args: [id],
         }) as string
 
-        const regFile = parseRegistrationFile(tokenUri)
+        const regFile = await parseRegistrationFile(tokenUri)
 
         // Reputation
         const repAbi = parseAbi(reputationRegistryAbi as unknown as string[])

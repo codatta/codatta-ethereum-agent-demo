@@ -499,53 +499,46 @@ npm run start:provider
               try {
                 const didIdentifier = BigInt(`0x${didHex}`)
                 const didAbi = parseAbi(didRegistryAbi as unknown as string[])
+                const didUri = hexToDidUri(didHex)
 
-                // 1. Write CodattaAgent metadata (name, description, serviceType) to DID document
-                //    This enables discovery via DID alone, without requiring ERC-8004.
-                const codattaAgent = JSON.stringify({
-                  id: `${hexToDidUri(didHex)}#codatta`,
-                  type: 'CodattaAgent',
+                // 1. Publish profile JSON (ERC-8004 registrationFile format) to profile service.
+                //    Single source of truth: both DID doc and future ERC-8004 tokenURI point here.
+                const profile = {
+                  type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
                   name, description,
                   serviceType: selectedService,
                   image: 'https://codatta.io/agents/default/avatar.png',
+                  services: [
+                    ...(webUrl ? [{ name: 'web', endpoint: webUrl }] : []),
+                    { name: 'MCP', endpoint: mcpUrl, version: '2025-06-18' },
+                    ...(a2aUrl ? [{ name: 'A2A', endpoint: a2aUrl, version: '0.3.0' }] : []),
+                    { name: 'DID', endpoint: didUri, version: 'v1' },
+                  ],
                   active: true,
                   supportedTrust: ['reputation'],
                   x402Support: true,
-                })
-                const hash1 = await writeContractAsync({
-                  address: addresses.didRegistry, abi: didAbi,
-                  functionName: 'addItemToAttribute',
-                  args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(codattaAgent))],
-                })
-                await client.waitForTransactionReceipt({ hash: hash1 })
-
-                // 2. Write MCP service endpoint to DID document
-                const mcpService = JSON.stringify({
-                  id: `${hexToDidUri(didHex)}#mcp`,
-                  type: 'MCPServer',
-                  serviceEndpoint: mcpUrl,
-                })
-                const hash2 = await writeContractAsync({
-                  address: addresses.didRegistry, abi: didAbi,
-                  functionName: 'addItemToAttribute',
-                  args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(mcpService))],
-                })
-                await client.waitForTransactionReceipt({ hash: hash2 })
-
-                // 3. Write A2A service endpoint to DID document (if provided)
-                if (a2aUrl) {
-                  const a2aService = JSON.stringify({
-                    id: `${hexToDidUri(didHex)}#a2a`,
-                    type: 'A2AAgent',
-                    serviceEndpoint: a2aUrl,
-                  })
-                  const hash3 = await writeContractAsync({
-                    address: addresses.didRegistry, abi: didAbi,
-                    functionName: 'addItemToAttribute',
-                    args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(a2aService))],
-                  })
-                  await client.waitForTransactionReceipt({ hash: hash3 })
                 }
+                const profileUrl = `${ENV.INVITE_SERVICE_URL}/profiles/${didUri}`
+                const putRes = await fetch(profileUrl, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(profile),
+                })
+                if (!putRes.ok) throw new Error(`Profile publish failed: HTTP ${putRes.status}`)
+
+                // 2. Write a single AgentProfile pointer to the DID document.
+                //    DID document stays identity-only; endpoints live in the profile JSON.
+                const profilePointer = JSON.stringify({
+                  id: `${didUri}#profile`,
+                  type: 'AgentProfile',
+                  serviceEndpoint: profileUrl,
+                })
+                const hash = await writeContractAsync({
+                  address: addresses.didRegistry, abi: didAbi,
+                  functionName: 'addItemToAttribute',
+                  args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(profilePointer))],
+                })
+                await client.waitForTransactionReceipt({ hash })
 
                 clearDraft(address)
                 setStep('done')
@@ -558,7 +551,7 @@ npm run start:provider
             disabled={txLoading}
             style={{ ...styles.btnPrimary, opacity: txLoading ? 0.5 : 1 }}
           >
-            {txLoading ? `Publishing (${a2aUrl ? 3 : 2} tx)...` : `Publish to DID (${a2aUrl ? 3 : 2} tx)`}
+            {txLoading ? 'Publishing (1 upload + 1 tx)...' : 'Publish to DID (1 upload + 1 tx)'}
           </button>
         </div>
 
@@ -624,8 +617,13 @@ npm run start:provider
                 const didIdentifier = BigInt(`0x${didHex}`)
                 const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
                 const didAbi = parseAbi(didRegistryAbi as unknown as string[])
+                const didUri = hexToDidUri(didHex)
+                const profileUrl = `${ENV.INVITE_SERVICE_URL}/profiles/${didUri}`
 
-                const regFile = {
+                // Re-publish profile to profile service in case the DID step was skipped
+                // or profile data has changed. Profile is single source of truth for both
+                // the DID document's #profile pointer and ERC-8004's tokenURI.
+                const profile = {
                   type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
                   name, description,
                   serviceType: selectedService,
@@ -634,18 +632,22 @@ npm run start:provider
                     ...(webUrl ? [{ name: 'web', endpoint: webUrl }] : []),
                     { name: 'MCP', endpoint: mcpUrl, version: '2025-06-18' },
                     ...(a2aUrl ? [{ name: 'A2A', endpoint: a2aUrl, version: '0.3.0' }] : []),
-                    { name: 'DID', endpoint: hexToDidUri(didHex), version: 'v1' },
+                    { name: 'DID', endpoint: didUri, version: 'v1' },
                   ],
                   active: true,
-                  registrations: [],
                   supportedTrust: ['reputation'], x402Support: true,
                 }
-                const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
+                const putRes = await fetch(profileUrl, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(profile),
+                })
+                if (!putRes.ok) throw new Error(`Profile publish failed: HTTP ${putRes.status}`)
 
-                // 1. Register on ERC-8004
+                // 1. Register on ERC-8004 — tokenURI points to the profile URL
                 const regHash = await writeContractAsync({
                   address: addresses.identityRegistry, abi: identAbi,
-                  functionName: 'register', args: [tokenUri],
+                  functionName: 'register', args: [profileUrl],
                 })
                 const regReceipt = await client.waitForTransactionReceipt({ hash: regHash })
 
@@ -668,7 +670,7 @@ npm run start:provider
 
                 // 3. Link: DID → ERC-8004 (addItemToAttribute)
                 const erc8004Service = JSON.stringify({
-                  id: `${hexToDidUri(didHex)}#erc8004`,
+                  id: `${didUri}#erc8004`,
                   type: 'ERC8004Agent',
                   serviceEndpoint: `eip155:${ENV.CHAIN_ID}:${addresses.identityRegistry}#${aid}`,
                 })
@@ -679,17 +681,17 @@ npm run start:provider
                 })
                 await client.waitForTransactionReceipt({ hash: h3 })
 
-                // 4. Update registration file with agentId in registrations array
-                const finalRegFile = {
-                  ...regFile,
+                // 4. Update profile with agentId in registrations array (profile re-PUT, no extra tx)
+                const finalProfile = {
+                  ...profile,
                   registrations: [{ agentId: aid.toString(), agentRegistry: addresses.identityRegistry }],
                 }
-                const finalUri = `data:application/json;base64,${btoa(JSON.stringify(finalRegFile))}`
-                const h4 = await writeContractAsync({
-                  address: addresses.identityRegistry, abi: identAbi,
-                  functionName: 'setAgentUri', args: [aid, finalUri],
+                const putFinal = await fetch(profileUrl, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(finalProfile),
                 })
-                await client.waitForTransactionReceipt({ hash: h4 })
+                if (!putFinal.ok) throw new Error(`Profile update failed: HTTP ${putFinal.status}`)
 
                 setAgentId(aid.toString())
               } catch (err: any) {
@@ -701,7 +703,7 @@ npm run start:provider
             disabled={txLoading}
             style={{ ...styles.btnPrimary, opacity: txLoading ? 0.5 : 1 }}
           >
-            {txLoading ? 'Registering (4 transactions)...' : 'Register on ERC-8004 (4 transactions)'}
+            {txLoading ? 'Registering (3 tx)...' : 'Register on ERC-8004 (3 tx + profile PUT)'}
           </button>
           {error && <p style={{ margin: '12px 0 0', color: THEME.danger, fontSize: 13 }}>{error}</p>}
         </div>
