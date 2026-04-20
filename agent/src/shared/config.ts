@@ -28,6 +28,11 @@ export const addresses = {
 export const PROVIDER_PORT = parseInt(process.env.PROVIDER_PORT || "4021");
 export const INVITE_SERVICE_URL = process.env.INVITE_SERVICE_URL || "http://127.0.0.1:4060";
 
+// x402 payment config
+export const X402_ENABLED = process.env.X402_ENABLED !== "false";
+export const USDC_PRICE_PER_IMAGE = parseFloat(process.env.USDC_PRICE_PER_IMAGE || "0.05");
+export const USDC_ADDRESS = process.env.USDC_ADDRESS!; // MockERC3009 on Anvil
+
 /** Convert uint128 hex to did:codatta:<uuid> format */
 export function hexToDidUri(hex: string): string {
   const h = hex.replace(/^0x/, "").padStart(32, "0");
