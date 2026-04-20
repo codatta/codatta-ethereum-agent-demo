@@ -21,7 +21,8 @@ import {
 import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
 import { startAnnotationService } from "./annotation-service.js";
-import { provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri } from "../shared/config.js";
+import { provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri, X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS } from "../shared/config.js";
+import { createX402Middleware, type X402Config } from "../shared/x402.js";
 import {
   DIDRegistrarABI, DIDRegistryABI,
   IdentityRegistryABI, ValidationRegistryABI, ReputationRegistryABI,
@@ -221,76 +222,68 @@ async function registerDid(): Promise<bigint> {
   return didIdentifier;
 }
 
-async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpoint: string) {
-  log.info("Adding service endpoints to DID document...");
+/**
+ * Publish the agent profile (ERC-8004 registrationFile format) to the profile service,
+ * then write a single `AgentProfile` pointer into the DID document's service array.
+ *
+ * DID document stays identity-only; profile JSON is the single source of truth for
+ * name/description/services/etc, and the same URL is reused by ERC-8004's tokenURI.
+ */
+async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string) {
   const didHex = codattaDid.toString(16);
+  const didUri = hexToDidUri(didHex);
 
-  // CodattaAgent metadata — enables discovery via DID alone
-  const codattaAgent = JSON.stringify({
-    id: `${hexToDidUri(didHex)}#codatta`,
-    type: "CodattaAgent",
-    name: "Codatta Annotation Agent",
-    description: "Image annotation service by Codatta. Supports object detection, semantic segmentation, and classification for autonomous driving datasets.",
-    serviceType: "annotation",
-    image: "https://codatta.io/agents/annotation/avatar.png",
-    active: true,
-    supportedTrust: ["reputation"],
-    x402Support: true,
-  });
-  await (await didRegistry.addItemToAttribute(
-    codattaDid, codattaDid, "service",
-    ethers.toUtf8Bytes(codattaAgent)
-  )).wait();
-
-  // MCP service endpoint
-  const mcpService = JSON.stringify({
-    id: `${hexToDidUri(didHex)}#mcp`,
-    type: "MCPServer",
-    serviceEndpoint: mcpEndpoint,
-  });
-  await (await didRegistry.addItemToAttribute(
-    codattaDid, codattaDid, "service",
-    ethers.toUtf8Bytes(mcpService)
-  )).wait();
-
-  // A2A service endpoint
-  const a2aService = JSON.stringify({
-    id: `${hexToDidUri(didHex)}#a2a`,
-    type: "A2AAgent",
-    serviceEndpoint: a2aEndpoint,
-  });
-  await (await didRegistry.addItemToAttribute(
-    codattaDid, codattaDid, "service",
-    ethers.toUtf8Bytes(a2aService)
-  )).wait();
-
-  log.success("Service endpoints added to DID document (CodattaAgent + MCP + A2A)");
-}
-
-async function registerAgent(codattaDid: bigint, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string, network: ethers.Network): Promise<bigint> {
-  log.info("Registering agent on ERC-8004...");
-  const didHex = codattaDid.toString(16);
-
-  const registrationFile = {
+  const profile = {
     type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
     name: "Codatta Annotation Agent",
     description: "Image annotation service by Codatta. Supports object detection, semantic segmentation, and classification for autonomous driving datasets.",
+    serviceType: "annotation",
     image: "https://codatta.io/agents/annotation/avatar.png",
     services: [
       { name: "web", endpoint: webEndpoint },
       { name: "MCP", endpoint: mcpEndpoint, version: "2025-06-18" },
       { name: "A2A", endpoint: a2aEndpoint, version: "0.3.0" },
-      { name: "DID", endpoint: hexToDidUri(didHex), version: "v1" },
+      { name: "DID", endpoint: didUri, version: "v1" },
     ],
     active: true,
-    registrations: [],
     supportedTrust: ["reputation"],
     x402Support: true,
   };
 
-  const agentUri = `data:application/json;base64,${Buffer.from(
-    JSON.stringify(registrationFile)
-  ).toString("base64")}`;
+  log.info("Publishing agent profile to profile service...");
+  const profileUrl = `${INVITE_SERVICE_URL}/profiles/${didUri}`;
+  const putRes = await fetch(profileUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  if (!putRes.ok) {
+    throw new Error(`Profile publish failed: HTTP ${putRes.status}`);
+  }
+  log.success(`Profile published: ${profileUrl}`);
+
+  log.info("Adding AgentProfile pointer to DID document...");
+  const profilePointer = JSON.stringify({
+    id: `${didUri}#profile`,
+    type: "AgentProfile",
+    serviceEndpoint: profileUrl,
+  });
+  await (await didRegistry.addItemToAttribute(
+    codattaDid, codattaDid, "service",
+    ethers.toUtf8Bytes(profilePointer)
+  )).wait();
+
+  log.success("DID document updated (#profile → profile service)");
+}
+
+async function registerAgent(codattaDid: bigint, _mcpEndpoint: string, _a2aEndpoint: string, _webEndpoint: string, network: ethers.Network): Promise<bigint> {
+  log.info("Registering agent on ERC-8004...");
+  const didHex = codattaDid.toString(16);
+  const didUri = hexToDidUri(didHex);
+
+  // tokenURI points to the same profile JSON referenced by the DID's #profile service.
+  // Profile is the single source of truth; both layers just hold a pointer.
+  const agentUri = `${INVITE_SERVICE_URL}/profiles/${didUri}`;
 
   const tx = await identity.register(agentUri);
   const receipt = await tx.wait();
@@ -376,6 +369,24 @@ async function main() {
   log.header(`Provider Agent — Chain ${network.chainId}`);
   log.info("Address:", wallet.address);
 
+  // ── x402 payment config ────────────────────────────────────────
+  const x402Config: X402Config = {
+    enabled: X402_ENABLED,
+    pricePerImageUsd: USDC_PRICE_PER_IMAGE,
+    payTo: wallet.address,
+    chainId: Number(network.chainId),
+    usdcAddress: USDC_ADDRESS,
+    networkName: `eip155:${network.chainId}`,
+  };
+  if (x402Config.enabled) {
+    log.info(`x402: $${x402Config.pricePerImageUsd}/image, payTo=${wallet.address.slice(0, 10)}... (ERC-3009)`);
+  } else {
+    log.info("x402: disabled (free dev mode — set X402_ENABLED=true to enable)");
+  }
+
+  // x402 middleware (ERC-3009) — createX402Middleware handles enabled/disabled internally
+  const x402Middleware = createX402Middleware(x402Config);
+
   const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
   const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
   const a2aEndpointUrl = `http://localhost:${A2A_PORT}`;
@@ -441,7 +452,7 @@ async function main() {
       codattaDid = await registerDid();
 
       log.step("Step 2/2: Add service to DID document");
-      await addServiceToDid(codattaDid, mcpEndpointUrl, a2aEndpointUrl);
+      await addServiceToDid(codattaDid, mcpEndpointUrl, a2aEndpointUrl, serviceEndpointUrl);
 
       // Save DID immediately
       saveIdentity({
@@ -598,10 +609,13 @@ async function main() {
 
   // MCP over Streamable HTTP (stateless mode — each request gets a fresh session)
   const mcpApp = express();
+  mcpApp.locals.wallet = wallet; // used by x402 middleware for on-chain settlement
+  mcpApp.locals.provider = provider; // used by x402 middleware for on-chain nonce checks
   mcpApp.use((_req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "*");
     res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.header("Access-Control-Expose-Headers", "X-PAYMENT-RECEIPT, X-PAYMENT-REQUIRED");
     if (_req.method === "OPTIONS") { res.sendStatus(200); return; }
     next();
   });
@@ -661,8 +675,8 @@ async function main() {
     version: "1.0.0",
     capabilities: { streaming: false, pushNotifications: false },
     skills: [
-      { id: "consult", name: "Service Consultation", description: "Ask about annotation capabilities, pricing, supported task types, and how to integrate via MCP" },
-      { id: "invite", name: "DID Registration", description: "Get an invite code to register a Codatta DID with free annotation credits. Provider can register on behalf of clients without ETH" },
+      { id: "consult", name: "Service Consultation", description: "Ask about annotation capabilities, pricing, supported task types, and how to integrate via MCP", tags: [] },
+      { id: "invite", name: "DID Registration", description: "Get an invite code to register a Codatta DID with free annotation credits. Provider can register on behalf of clients without ETH", tags: [] },
     ],
   };
 
@@ -835,24 +849,36 @@ async function main() {
 
   const app = express();
   app.use(express.json());
+  app.locals.wallet = wallet; // used by x402 middleware for on-chain settlement
+  app.locals.provider = provider; // used by x402 middleware for on-chain nonce checks
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "*");
     res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.header("Access-Control-Expose-Headers", "X-PAYMENT-RECEIPT, X-PAYMENT-REQUIRED");
     if (req.method === "OPTIONS") { res.sendStatus(200); return; }
     next();
   });
 
-  app.post("/annotate", async (req, res) => {
+  app.post("/annotate", x402Middleware, async (req, res) => {
     const { images, task } = req.body;
-    log.event("HTTP request", `${images?.length || 0} images, task=${task}`);
+    // Parse payment info from X-PAYMENT header (set by x402 middleware after verification)
+    const paymentHeader = req.headers["x-payment"] as string | undefined;
+    let payment = null;
+    if (paymentHeader) {
+      try { payment = JSON.parse(Buffer.from(paymentHeader, "base64").toString()); } catch { /* ignore */ }
+    }
+    log.event("HTTP request",
+      `${images?.length || 0} images, task=${task}` +
+      (payment ? ` [PAID by ${(payment.authorization?.from || payment.from || "")?.slice(0, 10)}...]` : ""));
+
 
     const annotations = await executeAnnotation(images, task);
     log.success(`Annotation complete: ${annotations.length} images`);
 
     if (agentId) await updateValidation(agentId);
 
-    const clientAddress = req.headers["x-client-address"] as string || "";
+    const clientAddress = payment?.from || req.headers["x-client-address"] as string || "";
     let feedbackAuth = "";
     try {
       if (clientAddress && agentId) {
@@ -878,6 +904,8 @@ async function main() {
           clientAddress: clientAddress || req.ip,
           task, imageCount: images?.length || 0,
           duration: null, status: "completed",
+          paymentAmount: payment?.authorization?.value?.toString() || payment?.amount || null,
+          paymentFrom: payment?.authorization?.from || payment?.from || null,
         }),
       });
     } catch {}
@@ -896,6 +924,10 @@ async function main() {
       agentId: agentId ? agentId.toString() : null,
       did: hexToDidUri(did.toString(16)),
       active: true,
+      x402: x402Config.enabled ? {
+        pricePerImageUsd: x402Config.pricePerImageUsd,
+        payTo: x402Config.payTo,
+      } : null,
     });
   });
 

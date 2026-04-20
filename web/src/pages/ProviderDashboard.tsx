@@ -76,7 +76,7 @@ export function ProviderDashboard() {
             address: addresses.identityRegistry, abi: identAbi,
             functionName: 'tokenURI', args: [agentId],
           }) as string
-          const regFile = parseRegistrationFile(tokenUri)
+          const regFile = await parseRegistrationFile(tokenUri)
 
           // Reputation
           let reputationScore = 0
@@ -129,7 +129,7 @@ export function ProviderDashboard() {
           const didHex = didId.toString(16)
           if (linkedDids.has(didHex)) continue // already counted as ERC-8004 agent
 
-          // Parse services from DID document
+          // Resolve profile from DID document's #profile pointer, then fetch registrationFile
           let didServices: Array<{ name: string; endpoint: string }> = []
           let hasMetadata = false
           try {
@@ -138,6 +138,7 @@ export function ProviderDashboard() {
               functionName: 'getDidDocument', args: [didId],
             }) as any
             const arrayAttrs = docResult[4] as any[]
+            let profileUrl: string | null = null
             for (const attr of arrayAttrs) {
               const name = attr[0] || attr.name
               if (name !== 'service') continue
@@ -149,12 +150,19 @@ export function ProviderDashboard() {
                 try {
                   const text = hexToString(val)
                   const parsed = JSON.parse(text)
-                  const type = parsed.type || ''
-                  if (type === 'CodattaAgent') { hasMetadata = true; continue }
-                  if (type === 'ERC8004Agent') continue
-                  const label = type === 'MCPServer' ? 'MCP' : type === 'A2AAgent' ? 'A2A' : type
-                  didServices.push({ name: label, endpoint: parsed.serviceEndpoint || '' })
+                  if (parsed.type === 'AgentProfile' && parsed.serviceEndpoint) {
+                    profileUrl = parsed.serviceEndpoint
+                  }
                 } catch {}
+              }
+            }
+            if (profileUrl) {
+              const profile = await parseRegistrationFile(profileUrl)
+              if (profile) {
+                hasMetadata = true
+                didServices = (profile.services || [])
+                  .filter(s => s.name === 'MCP' || s.name === 'A2A')
+                  .map(s => ({ name: s.name, endpoint: s.endpoint }))
               }
             }
           } catch {}
@@ -188,28 +196,31 @@ export function ProviderDashboard() {
       const identAbi = parseAbi(identityRegistryAbi as unknown as string[])
       const didAbi = parseAbi(didRegistryAbi as unknown as string[])
 
-      // Build minimal registration file from DID services
-      const agent = agents.find(a => a.didHex === didHex)
-      const services = agent?.didServices || []
-      const regFile = {
+      // Fetch existing profile from profile service — the single source of truth
+      const didUri = hexToDidUri(didHex)
+      const profileUrl = `${ENV.INVITE_SERVICE_URL}/profiles/${didUri}`
+      const existing = await parseRegistrationFile(profileUrl)
+      const profile = existing || {
         type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-        name: `Codatta Agent`,
+        name: 'Codatta Agent',
         description: 'Agent registered via Codatta DID',
         image: 'https://codatta.io/agents/default/avatar.png',
-        services: [
-          ...services,
-          { name: 'DID', endpoint: hexToDidUri(didHex), version: 'v1' },
-        ],
+        services: [{ name: 'DID', endpoint: didUri, version: 'v1' }],
         active: true,
-        registrations: [],
         supportedTrust: ['reputation'], x402Support: true,
       }
-      const tokenUri = `data:application/json;base64,${btoa(JSON.stringify(regFile))}`
+      // Ensure profile exists on profile service (re-PUT is idempotent)
+      const putRes = await fetch(profileUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      })
+      if (!putRes.ok) throw new Error(`Profile publish failed: HTTP ${putRes.status}`)
 
-      // 1. Register on ERC-8004
+      // 1. Register on ERC-8004 — tokenURI points to profile URL
       const regHash = await writeContractAsync({
         address: addresses.identityRegistry, abi: identAbi,
-        functionName: 'register', args: [tokenUri],
+        functionName: 'register', args: [profileUrl],
       })
       const regReceipt = await client.waitForTransactionReceipt({ hash: regHash })
 
@@ -232,7 +243,7 @@ export function ProviderDashboard() {
 
       // 3. Link: DID → ERC-8004 (addItemToAttribute)
       const erc8004Service = JSON.stringify({
-        id: `${hexToDidUri(didHex)}#erc8004`,
+        id: `${didUri}#erc8004`,
         type: 'ERC8004Agent',
         serviceEndpoint: `eip155:${ENV.CHAIN_ID}:${addresses.identityRegistry}#${aid}`,
       })
@@ -243,17 +254,17 @@ export function ProviderDashboard() {
       })
       await client.waitForTransactionReceipt({ hash: bh3 })
 
-      // 4. Update registration file with agentId
-      const finalRegFile = {
-        ...regFile,
+      // 4. Update profile with agentId in registrations (re-PUT to profile service, no tx)
+      const finalProfile = {
+        ...profile,
         registrations: [{ agentId: aid.toString(), agentRegistry: addresses.identityRegistry }],
       }
-      const finalUri = `data:application/json;base64,${btoa(JSON.stringify(finalRegFile))}`
-      const bh4 = await writeContractAsync({
-        address: addresses.identityRegistry, abi: identAbi,
-        functionName: 'setAgentUri', args: [aid, finalUri],
+      const putFinal = await fetch(profileUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(finalProfile),
       })
-      await client.waitForTransactionReceipt({ hash: bh4 })
+      if (!putFinal.ok) throw new Error(`Profile update failed: HTTP ${putFinal.status}`)
 
       setBoundResult({ didHex, agentId: aid.toString() })
       setReloadTick(t => t + 1)
@@ -271,21 +282,38 @@ export function ProviderDashboard() {
     try {
       const didIdentifier = BigInt(`0x${didHex}`)
       const didAbi = parseAbi(didRegistryAbi as unknown as string[])
-      const codattaAgent = JSON.stringify({
-        id: `${hexToDidUri(didHex)}#codatta`,
-        type: 'CodattaAgent',
+      const didUri = hexToDidUri(didHex)
+      const profileUrl = `${ENV.INVITE_SERVICE_URL}/profiles/${didUri}`
+
+      // Publish default profile (ERC-8004 registrationFile format) to profile service
+      const profile = {
+        type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
         name: 'Codatta Annotation Agent',
         description: 'Image annotation service by Codatta. Supports object detection, semantic segmentation, and classification.',
         serviceType: 'annotation',
         image: 'https://codatta.io/agents/default/avatar.png',
+        services: [{ name: 'DID', endpoint: didUri, version: 'v1' }],
         active: true,
         supportedTrust: ['reputation'],
         x402Support: true,
+      }
+      const putRes = await fetch(profileUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      })
+      if (!putRes.ok) throw new Error(`Profile publish failed: HTTP ${putRes.status}`)
+
+      // Add AgentProfile pointer to DID document
+      const profilePointer = JSON.stringify({
+        id: `${didUri}#profile`,
+        type: 'AgentProfile',
+        serviceEndpoint: profileUrl,
       })
       await writeContractAsync({
         address: addresses.didRegistry, abi: didAbi,
         functionName: 'addItemToAttribute',
-        args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(codattaAgent))],
+        args: [didIdentifier, didIdentifier, 'service', toHex(new TextEncoder().encode(profilePointer))],
       })
       setReloadTick(t => t + 1)
     } catch (err: any) {

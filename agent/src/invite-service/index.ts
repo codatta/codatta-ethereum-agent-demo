@@ -69,6 +69,8 @@ interface StoreData {
   hiddenAgents: string[];
   agentRegistrations: Record<string, AgentRegistration>;
   serviceHistory: ServiceRecord[];
+  // Agent profile JSON (ERC-8004 registrationFile format), keyed by DID (did:codatta:uuid)
+  profiles: Record<string, any>;
 }
 
 let store: StoreData = {
@@ -77,13 +79,16 @@ let store: StoreData = {
   hiddenAgents: [],
   agentRegistrations: {},
   serviceHistory: [],
+  profiles: {},
 };
 
 function loadStore() {
   try {
     if (fs.existsSync(DATA_FILE)) {
-      store = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
-      log.info(`Loaded data: ${Object.keys(store.invites).length} invites, ${store.hiddenAgents.length} hidden, ${Object.keys(store.agentRegistrations).length} registrations`);
+      const loaded = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+      // Backfill missing keys from older data files
+      store = { ...store, ...loaded, profiles: loaded.profiles || {} };
+      log.info(`Loaded data: ${Object.keys(store.invites).length} invites, ${store.hiddenAgents.length} hidden, ${Object.keys(store.agentRegistrations).length} registrations, ${Object.keys(store.profiles).length} profiles`);
     }
   } catch (err: any) {
     log.info("No existing data file, starting fresh");
@@ -173,7 +178,7 @@ async function main() {
   app.use((_req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     if (_req.method === "OPTIONS") { res.sendStatus(200); return; }
     next();
   });
@@ -441,6 +446,58 @@ async function main() {
     }
   });
 
+  // ── Agent profile (ERC-8004 registrationFile canonical home) ─
+  //
+  // Profile JSON is the single source of truth for an agent's metadata and
+  // service endpoints. Referenced from:
+  //   - DID document's `service` array via `{ type: "AgentProfile", serviceEndpoint: <url> }`
+  //   - ERC-8004 IdentityRegistry's tokenURI (returns this URL)
+  //
+  // Dev-mode: no auth. Production should require DID-owner signature on write.
+
+  function normalizeDidKey(raw: string): string {
+    // Accept "did:codatta:<uuid>" or raw hex (with or without dashes). Normalize to did URI.
+    const lower = raw.toLowerCase().trim();
+    if (lower.startsWith("did:codatta:")) return lower;
+    const hex = lower.replace(/^0x/, "").replace(/-/g, "");
+    return hexToDidUri(hex);
+  }
+
+  app.put("/profiles/:did", (req, res) => {
+    const did = normalizeDidKey(req.params.did);
+    const profile = req.body;
+    if (!profile || typeof profile !== "object") {
+      res.status(400).json({ error: "profile JSON required in body" });
+      return;
+    }
+    store.profiles[did] = profile;
+    saveStore();
+    log.info(`Profile saved: ${did}`);
+    res.json({ status: "ok", did, url: `/profiles/${did}` });
+  });
+
+  app.get("/profiles/:did", (req, res) => {
+    const did = normalizeDidKey(req.params.did);
+    const profile = store.profiles[did];
+    if (!profile) {
+      res.status(404).json({ error: "Profile not found" });
+      return;
+    }
+    res.json(profile);
+  });
+
+  app.delete("/profiles/:did", (req, res) => {
+    const did = normalizeDidKey(req.params.did);
+    if (!store.profiles[did]) {
+      res.status(404).json({ error: "Profile not found" });
+      return;
+    }
+    delete store.profiles[did];
+    saveStore();
+    log.info(`Profile deleted: ${did}`);
+    res.json({ status: "ok", did });
+  });
+
   // ── Faucet ──────────────────────────────────────────────────
 
   const FAUCET_AMOUNT = ethers.parseEther("1.0");
@@ -481,6 +538,7 @@ async function main() {
     log.info("  GET  /agents/hidden               — hidden list");
     log.info("  PUT  /agents/:id/registration     — save registration progress");
     log.info("  GET  /registrations/pending/:owner — pending registrations");
+    log.info("  PUT/GET/DELETE /profiles/:did     — agent profile (ERC-8004 registrationFile)");
     log.waiting("Ready");
   });
 }

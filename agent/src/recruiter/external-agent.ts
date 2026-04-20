@@ -47,7 +47,7 @@ const agentCard: AgentCard = {
   version: "1.0.0",
   capabilities: { streaming: false, pushNotifications: false },
   skills: [
-    { id: "annotate", name: "Image Annotation", description: "Label images with bounding boxes, segmentation masks, or classes" },
+    { id: "annotate", name: "Image Annotation", description: "Label images with bounding boxes, segmentation masks, or classes", tags: [] },
   ],
 };
 

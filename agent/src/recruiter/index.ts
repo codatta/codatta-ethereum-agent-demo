@@ -50,8 +50,8 @@ const agentCard: AgentCard = {
   version: "1.0.0",
   capabilities: { streaming: false, pushNotifications: false },
   skills: [
-    { id: "recruit-provider", name: "Recruit Provider", description: "Evaluate and onboard external data service agents into Codatta" },
-    { id: "capability-assessment", name: "Capability Assessment", description: "Assess agent capabilities via test annotation tasks" },
+    { id: "recruit-provider", name: "Recruit Provider", description: "Evaluate and onboard external data service agents into Codatta", tags: [] },
+    { id: "capability-assessment", name: "Capability Assessment", description: "Assess agent capabilities via test annotation tasks", tags: [] },
   ],
 };
 

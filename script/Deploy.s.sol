@@ -9,6 +9,7 @@ import {InviteRegistrar} from "codatta-did/InviteRegistrar.sol";
 import {IdentityRegistry} from "../src/erc8004/IdentityRegistry.sol";
 import {ReputationRegistry} from "../src/erc8004/ReputationRegistry.sol";
 import {ValidationRegistry} from "../src/erc8004/ValidationRegistry.sol";
+import {MockERC3009} from "../src/erc-3009/MockERC3009.sol";
 
 contract Deploy is Script {
     function run() external {
@@ -49,6 +50,10 @@ contract Deploy is Script {
         ValidationRegistry validation = new ValidationRegistry(address(identity));
         console.log("ValidationRegistry:", address(validation));
 
+        // MockERC3009 - ERC-3009 token for x402 payments
+        MockERC3009 mockUSDC = new MockERC3009();
+        console.log("MockERC3009 (USDC):", address(mockUSDC));
+
         vm.stopBroadcast();
 
         // Write deployment addresses
@@ -58,7 +63,8 @@ contract Deploy is Script {
         vm.serializeAddress(obj, "inviteRegistrar", address(inviteRegistrar));
         vm.serializeAddress(obj, "identityRegistry", address(identity));
         vm.serializeAddress(obj, "reputationRegistry", address(reputation));
-        string memory result = vm.serializeAddress(obj, "validationRegistry", address(validation));
+        vm.serializeAddress(obj, "validationRegistry", address(validation));
+        string memory result = vm.serializeAddress(obj, "mockUSDC", address(mockUSDC));
         vm.writeJson(result, "./script/deployment.json");
     }
 }
