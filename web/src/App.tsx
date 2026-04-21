@@ -8,6 +8,7 @@ import { Invites } from './pages/Invites'
 import { RegisterAgent } from './pages/RegisterAgent'
 import { DIDDocumentPage } from './pages/DIDDocument'
 import { Status } from './pages/Status'
+import { Tasks } from './pages/Tasks'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
           {/* Provider */}
           <Route path="/dashboard" element={<ProviderDashboard />} />
           <Route path="/invites" element={<Invites />} />
+          <Route path="/tasks" element={<Tasks />} />
           <Route path="/register-agent" element={<RegisterAgent />} />
           {/* Shared */}
           <Route path="/did/:identifier" element={<DIDDocumentPage />} />

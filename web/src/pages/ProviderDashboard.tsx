@@ -4,9 +4,11 @@ import { useAccount, usePublicClient, useWriteContract } from 'wagmi'
 import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toHex, hexToString } from 'viem'
 import { addresses, didRegistryAbi, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
 import { useHiddenAgents } from '../hooks/useHiddenAgents'
+import { useTasks } from '../hooks/useTasks'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 import { THEME, styles } from '../lib/theme'
 import { ENV, hexToDidUri, normalizeEndpoint } from '../config/env'
+import { CopyButton } from '../components/CopyButton'
 
 interface MyAgent {
   // null for DID-only entries
@@ -37,6 +39,11 @@ export function ProviderDashboard() {
   const [boundResult, setBoundResult] = useState<{ didHex: string; agentId: string } | null>(null)
   const [publishingDid, setPublishingDid] = useState<string | null>(null)
   const [publishError, setPublishError] = useState<string | null>(null)
+
+  // Async task inbox summary — pending + accepted + working are "open"
+  const { data: taskData } = useTasks(address, { status: 'pending,accepted,working' }, 8000)
+  const openTasks = taskData?.total || 0
+  const pendingTasks = taskData?.counts?.pending || 0
 
   useEffect(() => {
     if (!client || !isConnected || !address) {
@@ -352,7 +359,32 @@ export function ProviderDashboard() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h2 style={{ margin: 0 }}>Provider</h2>
-        <Link to="/register-agent" style={{ ...styles.btnPrimary, textDecoration: 'none' }}>+ New Agent</Link>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Link
+            to="/tasks"
+            style={{
+              ...styles.btnSecondary,
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              background: openTasks > 0 ? 'rgba(221,91,0,0.08)' : 'rgba(0,0,0,0.05)',
+              color: openTasks > 0 ? THEME.danger : THEME.textPrimary,
+            }}
+            title="Async task inbox"
+          >
+            Tasks
+            {openTasks > 0 && (
+              <span style={{
+                minWidth: 20, height: 20, padding: '0 6px', borderRadius: 9999,
+                background: pendingTasks > 0 ? THEME.danger : THEME.blue,
+                color: '#fff', fontSize: 11, fontWeight: 700,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}>{openTasks}</span>
+            )}
+          </Link>
+          <Link to="/register-agent" style={{ ...styles.btnPrimary, textDecoration: 'none' }}>+ New Agent</Link>
+        </div>
       </div>
 
       {/* Post-bind: show instructions to enable ERC-8004 in the local provider */}
@@ -361,15 +393,10 @@ export function ProviderDashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <strong>Agent ID bound successfully</strong>
-              <p style={{ margin: '4px 0 0', fontSize: 13 }}>
-                <span style={{ color: THEME.textMuted }}>Agent ID:</span>{' '}
+              <p style={{ margin: '4px 0 0', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: THEME.textMuted }}>Agent ID:</span>
                 <span style={styles.mono}>{boundResult.agentId}</span>
-                <button
-                  onClick={() => navigator.clipboard.writeText(boundResult.agentId)}
-                  style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, marginLeft: 8 }}
-                >
-                  Copy
-                </button>
+                <CopyButton text={boundResult.agentId} title="Copy Agent ID" />
               </p>
             </div>
             <button
@@ -386,15 +413,15 @@ export function ProviderDashboard() {
             <span style={styles.mono}>agent/</span> directory and restart:
           </p>
           <div style={{ position: 'relative' }}>
-            <pre style={{ ...styles.code, margin: 0, fontSize: 12, paddingRight: 60 }}>
+            <pre style={{ ...styles.code, margin: 0, fontSize: 12, paddingRight: 40 }}>
 {`npm run set-agent-id ${boundResult.agentId}`}
             </pre>
-            <button
-              onClick={() => navigator.clipboard.writeText(`npm run set-agent-id ${boundResult.agentId}`)}
-              style={{ position: 'absolute', top: 8, right: 8, border: 'none', background: 'rgba(255,255,255,0.12)', borderRadius: 4, padding: '4px 12px', cursor: 'pointer', fontSize: 13, color: 'rgba(255,255,255,0.6)' }}
-            >
-              copy
-            </button>
+            <CopyButton
+              text={`npm run set-agent-id ${boundResult.agentId}`}
+              title="Copy command"
+              variant="onDark"
+              style={{ position: 'absolute', top: 8, right: 8 }}
+            />
           </div>
         </div>
       )}
@@ -439,13 +466,7 @@ export function ProviderDashboard() {
                     {agent.agentId && (
                       <p style={{ margin: 0, ...styles.mono, fontSize: 12, color: THEME.textMuted, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ userSelect: 'all' }}>ID: {agent.agentId.toString()}</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(agent.agentId!.toString()) }}
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, padding: 0 }}
-                          title="Copy Agent ID"
-                        >
-                          Copy
-                        </button>
+                        <CopyButton text={agent.agentId.toString()} title="Copy Agent ID" />
                       </p>
                     )}
                   </div>
@@ -569,12 +590,16 @@ export function ProviderDashboard() {
           </StepCard>
 
           <StepCard num={2} title="Implement MCP Service">
-            <p>Expose your annotation capabilities as MCP tools. Clients discover your tools via <code>tools/list</code> and invoke them via <code>tools/call</code>.</p>
-            <p><strong>Required tools:</strong></p>
+            <p>Expose your capabilities as MCP tools. Clients discover your tools via <code>tools/list</code> and invoke them via <code>tools/call</code>.</p>
+            <p><strong>Sync base (one-call-returns-result):</strong></p>
+            <ul style={{ margin: '4px 0 8px', paddingLeft: 20 }}>
+              <li><code>annotate</code> — labels images, blocks until complete, returns annotations</li>
+            </ul>
+            <p><strong>Async base (submit + poll, persistent queue):</strong></p>
             <ul style={{ margin: '4px 0', paddingLeft: 20 }}>
-              <li><code>annotate</code> — submit images for annotation (async, returns taskId)</li>
-              <li><code>get_task_status</code> — poll for task completion</li>
-              <li><code>claim_invite</code> — claim invite codes for free quota</li>
+              <li><code>submit_task(serviceName, payload)</code> — queue a task, returns taskId + retryAfterSeconds</li>
+              <li><code>get_task(taskId)</code> — check status and fetch result when ready</li>
+              <li><code>list_tasks</code> — list submitted tasks</li>
             </ul>
           </StepCard>
 
