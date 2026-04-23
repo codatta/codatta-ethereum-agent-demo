@@ -21,7 +21,8 @@ import {
 import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
 import { startAnnotationService } from "./annotation-service.js";
-import { AsyncServiceRegistry, submitTask, getTask, listTasks, startAsyncWorker, recommendRetryAfterSeconds, type AsyncServiceDescriptor } from "./async-service.js";
+import { AsyncServiceRegistry, submitTask, getTask, listTasks, startAsyncWorker, recommendRetryAfterSeconds, type AsyncServiceDescriptor, type SyncServiceDescriptor } from "./async-service.js";
+import { scoreAddress } from "./risk-score.js";
 import { provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri, X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS } from "../shared/config.js";
 import { createX402Middleware, type X402Config } from "../shared/x402.js";
 import {
@@ -35,6 +36,28 @@ log.setRole("provider");
 
 const IDENTITY_FILE = path.join(import.meta.dirname, "../../provider-identity.json");
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
+
+// Sync services this provider advertises. Both `addServiceToDid` (fresh
+// publish) and `syncAsyncServicesInProfile` (in-place refresh) read from
+// here so the two paths stay in sync.
+const SYNC_SERVICES: SyncServiceDescriptor[] = [
+  {
+    name: "annotation",
+    description: "Image annotation. One MCP call returns annotations.",
+    protocol: "mcp",
+    mcpTool: "annotate",
+    estimatedSeconds: 3,
+    avgTurnaround: "~2s",
+  },
+  {
+    name: "risk-score",
+    description: "Score an Ethereum address for risk (sanctioned / known-scam / proximity-to-risky). One MCP call returns { riskScore 0-100, labels, reasoning }.",
+    protocol: "mcp",
+    mcpTool: "risk_score",
+    estimatedSeconds: 1,
+    avgTurnaround: "<1s",
+  },
+];
 
 // ── Wallet setup ────────────────────────────────────────────────
 
@@ -237,16 +260,7 @@ async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpo
     // blocks and returns the result. Each entry carries standardized fields
     // (protocol / mcpTool / estimatedSeconds / avgTurnaround) so a generic
     // client can invoke without hardcoding.
-    syncServices: [
-      {
-        name: "annotation",
-        description: "Image annotation. One MCP call returns annotations.",
-        protocol: "mcp",
-        mcpTool: "annotate",
-        estimatedSeconds: 3,
-        avgTurnaround: "~2s",
-      },
-    ],
+    syncServices: SYNC_SERVICES,
     // asyncServices: business services invoked via submit_task + get_task.
     // Tasks appear in the provider's inbox (web dashboard) until handled.
     // Tool names are standardized to submit_task / get_task / list_tasks.
@@ -283,40 +297,38 @@ async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpo
 }
 
 /**
- * Merge asyncServices into the existing profile on the profile service.
- * No-op if nothing to add. Used on startup so returning providers don't need to
- * re-register just to advertise async capabilities.
+ * Merge the provider's current sync + async service catalog into the existing
+ * profile on the profile service. No-op if nothing changed. Used on startup so
+ * returning providers pick up newly-declared services without re-registering.
  */
 async function syncAsyncServicesInProfile(codattaDid: bigint, asyncServices: AsyncServiceDescriptor[]) {
-  if (asyncServices.length === 0) return;
   const didUri = hexToDidUri(codattaDid.toString(16));
   const profileUrl = `${INVITE_SERVICE_URL}/profiles/${didUri}`;
   try {
     const getRes = await fetch(profileUrl);
     if (!getRes.ok) return; // no existing profile — addServiceToDid handles fresh case
     const profile = await getRes.json() as Record<string, unknown>;
-    const existing = Array.isArray(profile.asyncServices) ? profile.asyncServices : [];
-    const names = new Set((existing as Array<{ name: string }>).map(s => s.name));
-    const merged = [...existing as Array<{ name: string }>, ...asyncServices.filter(s => !names.has(s.name))];
-    // Short-circuit if nothing changed
-    if (merged.length === existing.length) return;
-    profile.asyncServices = merged;
-    if (!Array.isArray(profile.syncServices)) {
-      profile.syncServices = [{
-        name: "annotation",
-        description: "Image annotation. One MCP call returns annotations.",
-        protocol: "mcp",
-        mcpTool: "annotate",
-        estimatedSeconds: 3,
-        avgTurnaround: "~2s",
-      }];
-    }
+
+    const existingAsync = Array.isArray(profile.asyncServices) ? profile.asyncServices as Array<{ name: string }> : [];
+    const asyncNames = new Set(existingAsync.map(s => s.name));
+    const mergedAsync = [...existingAsync, ...asyncServices.filter(s => !asyncNames.has(s.name))];
+
+    const existingSync = Array.isArray(profile.syncServices) ? profile.syncServices as Array<{ name: string }> : [];
+    const syncNames = new Set(existingSync.map(s => s.name));
+    const mergedSync = [...existingSync, ...SYNC_SERVICES.filter(s => !syncNames.has(s.name))];
+
+    const asyncChanged = mergedAsync.length !== existingAsync.length;
+    const syncChanged = mergedSync.length !== existingSync.length;
+    if (!asyncChanged && !syncChanged) return;
+
+    profile.asyncServices = mergedAsync;
+    profile.syncServices = mergedSync;
     const putRes = await fetch(profileUrl, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(profile),
     });
-    if (putRes.ok) log.info("Profile refreshed with asyncServices");
+    if (putRes.ok) log.info(`Profile refreshed (sync:${syncChanged ? "+" : "="} async:${asyncChanged ? "+" : "="})`);
   } catch {
     // Profile service unreachable — not fatal
   }
@@ -622,6 +634,26 @@ async function main() {
       }
     );
 
+    // Tool: risk_score — second sync service. Sibling of annotate.
+    // Scores a wallet address against a demo blacklist + proximity map and
+    // returns a decision-grade result. Prototype; a real impl would derive
+    // blacklist + contact graph from on-chain data and third-party feeds.
+    server.tool(
+      "risk_score",
+      "Score an Ethereum address for risk. One MCP call returns " +
+      "{ address, riskScore 0-100, labels, reasoning, checkedAt }. " +
+      "Labels: `sanctioned`, `known-scam`, `proximity-to-risky`. " +
+      "MVP uses a demo blacklist — not real OFAC / chain-analysis data.",
+      {
+        address: z.string().regex(/^0x[0-9a-fA-F]{40}$/).describe("Ethereum address to score (0x + 40 hex chars)"),
+      },
+      async ({ address }) => {
+        const result = scoreAddress(address);
+        log.event("MCP tool call", `risk_score: ${address} → score=${result.riskScore} labels=[${result.labels.join(",")}]`);
+        return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      }
+    );
+
     // Note: claim_invite removed — DID registration with invite now happens on-chain
     // via InviteRegistrar.registerWithInvite(). No MCP tool needed.
 
@@ -775,7 +807,8 @@ async function main() {
 
   mcpApp.listen(MCP_PORT, "0.0.0.0", () => {
     log.success(`MCP server running on ${mcpEndpointUrl}`);
-    log.info("  Sync  tool: annotate(images, task, labels?, clientAddress?) → blocks, returns annotations");
+    log.info("  Sync  tools: annotate(images, task, labels?, clientAddress?) → annotations");
+    log.info("               risk_score(address) → { riskScore, labels, reasoning }");
     log.info("  Async tools: submit_task / get_task / list_tasks");
   });
 
@@ -840,7 +873,7 @@ async function main() {
                   service: "annotation",
                   provider: "Codatta",
                   mcpEndpoint: mcpEndpointUrl,
-                  mcpTools: ["annotate", "submit_task", "get_task", "list_tasks"],
+                  mcpTools: ["annotate", "risk_score", "submit_task", "get_task", "list_tasks"],
                   pricing: { perImage: "$0.05", currency: "USDC", protocol: "x402" },
                   inviteRegistrar: addresses.inviteRegistrar,
                   supportedTasks: ["object-detection", "segmentation", "classification"],
