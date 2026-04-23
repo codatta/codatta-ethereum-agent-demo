@@ -279,26 +279,13 @@ async function main() {
       ];
       log.info(`Calling annotate: ${images.length} images, task=object-detection`);
 
-      const submitResult = await mcpClient.callTool({
+      const callResult = await mcpClient.callTool({
         name: "annotate",
         arguments: { images, task: "object-detection", clientAddress: wallet.address, clientDid: inviteData.clientDid },
       });
-      const submitText = submitResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
-      const submitData = submitText ? JSON.parse(submitText.text) : {};
-      log.info(`Task submitted: ${submitData.taskId} (status: ${submitData.status})`);
-
-      log.info("Polling for completion...");
-      let result: any = null;
-      for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const statusResult = await mcpClient.callTool({ name: "get_task_status", arguments: { taskId: submitData.taskId } });
-        const statusText = statusResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
-        if (!statusText) continue;
-        const statusData = JSON.parse(statusText.text);
-        if (statusData.status === "completed") { result = statusData; break; }
-        if (statusData.status === "failed") throw new Error("Annotation task failed");
-      }
-      if (!result) throw new Error("Task did not complete within timeout");
+      const callText = callResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
+      const result: any = callText ? JSON.parse(callText.text) : {};
+      if (result.status !== "completed") throw new Error(`Unexpected status: ${result.status}`);
 
       log.success(`Annotation received: ${result.annotations.length} images (${result.duration})`);
       for (const ann of result.annotations) {
@@ -379,7 +366,7 @@ async function main() {
 
       log.info(`Calling annotate: ${images.length} images, task=object-detection`);
 
-      const submitResult = await mcpClient.callTool({
+      const callResult = await mcpClient.callTool({
         name: "annotate",
         arguments: {
           images,
@@ -387,27 +374,9 @@ async function main() {
           clientAddress: wallet.address,
         },
       });
-      const submitText = submitResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
-      const submitData = submitText ? JSON.parse(submitText.text) : {};
-      log.info(`Task submitted: ${submitData.taskId} (status: ${submitData.status})`);
-
-      // Poll for completion
-      log.info("Polling for completion...");
-      let result: any = null;
-      for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const statusResult = await mcpClient.callTool({
-          name: "get_task_status",
-          arguments: { taskId: submitData.taskId },
-        });
-        const statusText = statusResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
-        if (!statusText) continue;
-        const statusData = JSON.parse(statusText.text);
-        if (statusData.status === "completed") { result = statusData; break; }
-        if (statusData.status === "failed") throw new Error("Annotation task failed");
-      }
-
-      if (!result) throw new Error("Task did not complete within timeout");
+      const callText = callResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
+      const result: any = callText ? JSON.parse(callText.text) : {};
+      if (result.status !== "completed") throw new Error(`Unexpected status: ${result.status}`);
 
       log.success(`Annotation received: ${result.annotations.length} images (${result.duration})`);
       for (const ann of result.annotations) {

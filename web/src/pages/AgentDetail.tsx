@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAgentDetail } from '../hooks/useAgentDetail'
 import { THEME, styles } from '../lib/theme'
 import { hexToDidUri, normalizeEndpoint } from '../config/env'
+import { CopyButton } from '../components/CopyButton'
 
 export function AgentDetail() {
   const { agentId } = useParams()
@@ -58,12 +59,7 @@ export function AgentDetail() {
                   {normalizeEndpoint(svc.endpoint)}
                 </code>
                 {svc.version && <span style={{ fontSize: 11, color: THEME.textMuted }}>{svc.version}</span>}
-                <button
-                  onClick={() => navigator.clipboard.writeText(normalizeEndpoint(svc.endpoint))}
-                  style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: THEME.accentBlue, padding: 0, flexShrink: 0 }}
-                >
-                  Copy
-                </button>
+                <CopyButton text={normalizeEndpoint(svc.endpoint)} title="Copy endpoint" />
               </div>
             ))}
           </div>
