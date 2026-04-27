@@ -10,9 +10,14 @@ export function Layout() {
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', borderBottom: THEME.border }}>
-        <Link to="/" style={{ fontSize: 18, fontWeight: 700, textDecoration: 'none', color: THEME.textPrimary, letterSpacing: -0.5 }}>
-          Codatta
-        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          <Link to="/" style={{ fontSize: 18, fontWeight: 700, textDecoration: 'none', color: THEME.textPrimary, letterSpacing: -0.5 }}>
+            Codatta
+          </Link>
+          <Link to="/bazaar" style={{ fontSize: 14, fontWeight: 500, textDecoration: 'none', color: THEME.textSecondary }}>
+            Bazaar
+          </Link>
+        </div>
         <ConnectButton />
       </header>
 

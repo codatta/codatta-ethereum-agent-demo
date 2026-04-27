@@ -25,6 +25,7 @@ export interface DidAgentMeta {
   active: boolean
   x402Support: boolean
   services: Array<{ name: string; endpoint: string }>
+  webEndpoint: string | null
 }
 
 export function useAgentList() {
@@ -142,6 +143,8 @@ export function useAgentList() {
                 const services = (profile.services || [])
                   .filter(s => s.name !== 'DID' && s.name !== 'web')
                   .map(s => ({ name: s.name, endpoint: s.endpoint }))
+                const webEndpoint = (profile.services || [])
+                  .find(s => s.name === 'web')?.endpoint || null
                 meta = {
                   name: profile.name || '',
                   description: profile.description || '',
@@ -149,6 +152,7 @@ export function useAgentList() {
                   active: profile.active !== false,
                   x402Support: profile.x402Support === true,
                   services,
+                  webEndpoint,
                 }
               }
             }
