@@ -21,7 +21,10 @@ import {
 import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
 import { startAnnotationService } from "./annotation-service.js";
-import { provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri, X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS } from "../shared/config.js";
+import {
+  provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri,
+  X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS, USDC_NAME, USDC_VERSION, USDC_DECIMALS, RPC_URL,
+} from "../shared/config.js";
 import { createX402Middleware, type X402Config } from "../shared/x402.js";
 import {
   DIDRegistrarABI, DIDRegistryABI,
@@ -229,11 +232,8 @@ async function registerDid(): Promise<bigint> {
  * DID document stays identity-only; profile JSON is the single source of truth for
  * name/description/services/etc, and the same URL is reused by ERC-8004's tokenURI.
  */
-async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string) {
-  const didHex = codattaDid.toString(16);
-  const didUri = hexToDidUri(didHex);
-
-  const profile = {
+function buildAgentProfile(didUri: string, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string) {
+  return {
     type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
     name: "Codatta Annotation Agent",
     description: "Image annotation service by Codatta. Supports object detection, semantic segmentation, and classification for autonomous driving datasets.",
@@ -249,17 +249,27 @@ async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpo
     supportedTrust: ["reputation"],
     x402Support: true,
   };
+}
 
-  log.info("Publishing agent profile to profile service...");
+async function publishProfile(didUri: string, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string) {
   const profileUrl = `${INVITE_SERVICE_URL}/profiles/${didUri}`;
   const putRes = await fetch(profileUrl, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(profile),
+    body: JSON.stringify(buildAgentProfile(didUri, mcpEndpoint, a2aEndpoint, webEndpoint)),
   });
   if (!putRes.ok) {
     throw new Error(`Profile publish failed: HTTP ${putRes.status}`);
   }
+  return profileUrl;
+}
+
+async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string) {
+  const didHex = codattaDid.toString(16);
+  const didUri = hexToDidUri(didHex);
+
+  log.info("Publishing agent profile to profile service...");
+  const profileUrl = await publishProfile(didUri, mcpEndpoint, a2aEndpoint, webEndpoint);
   log.success(`Profile published: ${profileUrl}`);
 
   log.info("Adding AgentProfile pointer to DID document...");
@@ -372,20 +382,23 @@ async function main() {
   // ── x402 payment config ────────────────────────────────────────
   const x402Config: X402Config = {
     enabled: X402_ENABLED,
-    pricePerImageUsd: USDC_PRICE_PER_IMAGE,
+    priceUsd: USDC_PRICE_PER_IMAGE,
     payTo: wallet.address,
     chainId: Number(network.chainId),
-    usdcAddress: USDC_ADDRESS,
-    networkName: `eip155:${network.chainId}`,
+    rpcUrl: RPC_URL,
+    tokenAddress: USDC_ADDRESS as `0x${string}`,
+    tokenName: USDC_NAME,
+    tokenVersion: USDC_VERSION,
+    tokenDecimals: USDC_DECIMALS,
   };
   if (x402Config.enabled) {
-    log.info(`x402: $${x402Config.pricePerImageUsd}/image, payTo=${wallet.address.slice(0, 10)}... (ERC-3009)`);
+    log.info(`x402: $${x402Config.priceUsd}/call, payTo=${wallet.address.slice(0, 10)}... (ERC-3009)`);
   } else {
     log.info("x402: disabled (free dev mode — set X402_ENABLED=true to enable)");
   }
 
-  // x402 middleware (ERC-3009) — createX402Middleware handles enabled/disabled internally
-  const x402Middleware = createX402Middleware(x402Config);
+  // x402 middleware — facilitator shares provider wallet for settlement
+  const x402Middleware = createX402Middleware(x402Config, wallet);
 
   const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
   const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
@@ -414,6 +427,16 @@ async function main() {
         log.step("Identity loaded");
         log.info("Codatta DID:", hexToDidUri(codattaDid.toString(16)));
         log.success("DID verified on-chain");
+
+        // Re-publish profile to the profile service. The DID document already
+        // points here; profile data may be gone if the service restarted.
+        try {
+          const didUri = hexToDidUri(codattaDid.toString(16));
+          await publishProfile(didUri, mcpEndpointUrl, a2aEndpointUrl, serviceEndpointUrl);
+          log.info("Profile refreshed on profile service");
+        } catch (e: any) {
+          log.info(`Profile refresh failed (non-fatal): ${e.message}`);
+        }
 
         // Optionally load and verify agentId
         if (saved.agentId) {
@@ -609,8 +632,8 @@ async function main() {
 
   // MCP over Streamable HTTP (stateless mode — each request gets a fresh session)
   const mcpApp = express();
-  mcpApp.locals.wallet = wallet; // used by x402 middleware for on-chain settlement
-  mcpApp.locals.provider = provider; // used by x402 middleware for on-chain nonce checks
+  mcpApp.locals.wallet = wallet;
+  mcpApp.locals.provider = provider;
   mcpApp.use((_req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "*");
@@ -619,6 +642,24 @@ async function main() {
     if (_req.method === "OPTIONS") { res.sendStatus(200); return; }
     next();
   });
+
+  // Parse JSON body so we can inspect the JSON-RPC method before handing off
+  // to the MCP transport. handleRequest() accepts an already-parsed body.
+  mcpApp.use(express.json());
+
+  // x402 gate — charges only for JSON-RPC `tools/call` targeting billable tools.
+  // Free passes: initialize, tools/list, notifications, get_task_status (polling), etc.
+  const BILLABLE_MCP_TOOLS = new Set(["annotate"]);
+  const x402McpMiddleware = createX402Middleware({ ...x402Config, routePath: "/mcp" }, wallet);
+  mcpApp.use((req, res, next) => {
+    if (req.method !== "POST" || req.path !== "/mcp") return next();
+    const body = req.body as { method?: string; params?: { name?: string } } | undefined;
+    const isPaidCall =
+      body?.method === "tools/call" && !!body.params?.name && BILLABLE_MCP_TOOLS.has(body.params.name);
+    if (!isPaidCall) return next();
+    return x402McpMiddleware(req, res, next);
+  });
+
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   mcpApp.post("/mcp", async (req, res) => {
@@ -638,7 +679,7 @@ async function main() {
       await server.connect(transport);
     }
 
-    await transport.handleRequest(req, res);
+    await transport.handleRequest(req, res, req.body);
   });
 
   mcpApp.get("/mcp", async (req, res) => {
@@ -925,7 +966,7 @@ async function main() {
       did: hexToDidUri(did.toString(16)),
       active: true,
       x402: x402Config.enabled ? {
-        pricePerImageUsd: x402Config.pricePerImageUsd,
+        priceUsd: x402Config.priceUsd,
         payTo: x402Config.payTo,
       } : null,
     });

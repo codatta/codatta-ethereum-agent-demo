@@ -4,7 +4,10 @@ import path from "path";
 import readline from "readline";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { provider, getWallet, addresses, hexToDidUri, X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS } from "../shared/config.js";
+import {
+  provider, getWallet, addresses, hexToDidUri,
+  X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS, USDC_NAME, USDC_VERSION, USDC_DECIMALS, RPC_URL,
+} from "../shared/config.js";
 
 /**
  * Fetch ERC-8004 registrationFile from a tokenURI.
@@ -149,16 +152,18 @@ async function main() {
   log.header(`Client Agent — Chain ${network.chainId}`);
   log.info("Address:", wallet.address);
 
-  // x402 payment wrapper — auto-retries HTTP calls with signed payment on 402
-  // payTo is overridden by server's payTo in 402 response, so placeholder is fine
-  const networkName = Number(network.chainId) === 31337 ? "Local" : "Sepolia";
+  // x402 payment wrapper — auto-signs EIP-3009 on 402 and retries.
+  // payTo/tokenAddress below are placeholders; server's 402 response overrides.
   const x402Config: X402Config = {
     enabled: X402_ENABLED,
-    pricePerImageUsd: USDC_PRICE_PER_IMAGE,
-    payTo: wallet.address, // placeholder; server overrides in 402 response
+    priceUsd: USDC_PRICE_PER_IMAGE,
+    payTo: wallet.address,
     chainId: Number(network.chainId),
-    usdcAddress: USDC_ADDRESS,
-    networkName,
+    rpcUrl: RPC_URL,
+    tokenAddress: USDC_ADDRESS as `0x${string}`,
+    tokenName: USDC_NAME,
+    tokenVersion: USDC_VERSION,
+    tokenDecimals: USDC_DECIMALS,
   };
   const x402Fetch = wrapFetchWithX402(wallet, x402Config);
 
@@ -233,10 +238,11 @@ async function main() {
   log.step("A2A consultation with Provider");
 
   if (a2aService) {
-    const a2aUrl = a2aService.endpoint.replace("/.well-known/agent-card.json", "");
+    const a2aUrl = a2aService.endpoint.replace(/\/\.well-known\/agent-card\.json$/, "");
+    const cardUrl = a2aUrl.replace(/\/$/, "") + "/.well-known/agent-card.json";
 
     // Fetch Agent Card
-    const cardRes = await fetch(a2aService.endpoint);
+    const cardRes = await fetch(cardUrl);
     const card = await cardRes.json() as any;
     log.info("A2A Agent:", card.name);
     log.info("Skills:", card.skills?.map((s: any) => s.name).join(", "));
