@@ -23,6 +23,10 @@ INVITE_REGISTRAR=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT'))
 IDENTITY_REGISTRY=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT'))['identityRegistry'])")
 REPUTATION_REGISTRY=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT'))['reputationRegistry'])")
 VALIDATION_REGISTRY=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT'))['validationRegistry'])")
+# mockUSDC is only present when deploying against a local Anvil chain.
+# On Base Sepolia / mainnet the agent uses the real USDC address from .env,
+# so we leave USDC_ADDRESS untouched when the field is missing.
+MOCK_USDC=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT')).get('mockUSDC',''))")
 
 # Update .env (replace existing values or append)
 update_env() {
@@ -53,3 +57,10 @@ echo "  INVITE_REGISTRAR=$INVITE_REGISTRAR"
 echo "  IDENTITY_REGISTRY=$IDENTITY_REGISTRY"
 echo "  REPUTATION_REGISTRY=$REPUTATION_REGISTRY"
 echo "  VALIDATION_REGISTRY=$VALIDATION_REGISTRY"
+
+if [ -n "$MOCK_USDC" ]; then
+  update_env "USDC_ADDRESS" "$MOCK_USDC"
+  echo "  USDC_ADDRESS=$MOCK_USDC (from mockUSDC)"
+else
+  echo "  USDC_ADDRESS: preserved (no mockUSDC in deployment.json — assuming real network)"
+fi

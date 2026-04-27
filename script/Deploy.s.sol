@@ -50,9 +50,14 @@ contract Deploy is Script {
         ValidationRegistry validation = new ValidationRegistry(address(identity));
         console.log("ValidationRegistry:", address(validation));
 
-        // MockERC3009 - ERC-3009 token for x402 payments
-        MockERC3009 mockUSDC = new MockERC3009();
-        console.log("MockERC3009 (USDC):", address(mockUSDC));
+        // MockERC3009 - ERC-3009 token for x402 payments (skip on real networks
+        // where USDC already exists; agent reads USDC_ADDRESS from .env directly).
+        bool skipMockUsdc = vm.envOr("SKIP_MOCK_USDC", false);
+        address mockUSDC;
+        if (!skipMockUsdc) {
+            mockUSDC = address(new MockERC3009());
+            console.log("MockERC3009 (USDC):", mockUSDC);
+        }
 
         vm.stopBroadcast();
 
@@ -63,8 +68,13 @@ contract Deploy is Script {
         vm.serializeAddress(obj, "inviteRegistrar", address(inviteRegistrar));
         vm.serializeAddress(obj, "identityRegistry", address(identity));
         vm.serializeAddress(obj, "reputationRegistry", address(reputation));
-        vm.serializeAddress(obj, "validationRegistry", address(validation));
-        string memory result = vm.serializeAddress(obj, "mockUSDC", address(mockUSDC));
+        string memory result;
+        if (skipMockUsdc) {
+            result = vm.serializeAddress(obj, "validationRegistry", address(validation));
+        } else {
+            vm.serializeAddress(obj, "validationRegistry", address(validation));
+            result = vm.serializeAddress(obj, "mockUSDC", mockUSDC);
+        }
         vm.writeJson(result, "./script/deployment.json");
     }
 }
