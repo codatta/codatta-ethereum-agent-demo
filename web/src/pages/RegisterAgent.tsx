@@ -7,9 +7,10 @@ import { Link } from 'react-router-dom'
 import { THEME, styles } from '../lib/theme'
 import { ENV, hexToDidUri, didUriToHex } from '../config/env'
 import { NetworkCheck } from '../components/NetworkCheck'
+import { CopyButton } from '../components/CopyButton'
 
 const SERVICE_TYPES = [
-  { id: 'annotation', name: 'Data Annotation', description: 'Image labeling, object detection, segmentation, classification', requiredTools: ['annotate', 'get_task_status'] },
+  { id: 'annotation', name: 'Data Annotation', description: 'Image labeling, object detection, segmentation, classification', requiredTools: ['annotate'] },
 ]
 
 type Step = 'did' | 'service' | 'verify' | 'publish' | 'done'
@@ -249,9 +250,12 @@ export function RegisterAgent() {
         <StepIndicator current="service" onReset={resetDraft} />
 
         <div style={{ ...styles.card, marginBottom: 16 }}>
-          <p style={{ margin: 0, fontSize: 13 }}>
-            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <p style={{ margin: 0, fontSize: 13 }}>
+              <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
+            </p>
+            <CopyButton text={hexToDidUri(didHex)} title="Copy DID" />
+          </div>
         </div>
 
         <p style={{ color: THEME.textSecondary, marginBottom: 20 }}>
@@ -385,9 +389,12 @@ npm run start:provider
         <StepIndicator current="verify" onReset={resetDraft} />
 
         <div style={{ ...styles.card, marginBottom: 16 }}>
-          <p style={{ margin: 0, fontSize: 13 }}>
-            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <p style={{ margin: 0, fontSize: 13 }}>
+              <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
+            </p>
+            <CopyButton text={hexToDidUri(didHex)} title="Copy DID" />
+          </div>
           <p style={{ margin: '4px 0 0', fontSize: 13 }}>
             <strong>MCP:</strong> <span style={styles.mono}>{mcpUrl}</span>
           </p>
@@ -474,9 +481,12 @@ npm run start:provider
         </p>
 
         <div style={{ ...styles.card, marginBottom: 16 }}>
-          <p style={{ margin: 0, fontSize: 13 }}>
-            <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <p style={{ margin: 0, fontSize: 13 }}>
+              <strong>DID:</strong> <span style={styles.mono}>{hexToDidUri(didHex)}</span>
+            </p>
+            <CopyButton text={hexToDidUri(didHex)} title="Copy DID" />
+          </div>
           <p style={{ margin: '4px 0 0', fontSize: 13 }}>
             <strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}
           </p>
@@ -567,7 +577,10 @@ npm run start:provider
     <div>
       <h2>Agent Published!</h2>
       <div style={{ ...styles.card, background: 'rgba(34,197,94,0.06)' }}>
-        <p><strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>{hexToDidUri(didHex)}</Link></p>
+        <p>
+          <strong>DID:</strong> <Link to={`/did/${didHex}`} style={{ fontFamily: 'monospace' }}>{hexToDidUri(didHex)}</Link>
+          <CopyButton text={hexToDidUri(didHex)} title="Copy DID" />
+        </p>
         <p><strong>Name:</strong> {name}</p>
         <p><strong>Service:</strong> {SERVICE_TYPES.find(s => s.id === selectedService)?.name}</p>
         <p><strong>MCP:</strong> <span style={styles.mono}>{mcpUrl}</span></p>
@@ -578,13 +591,13 @@ npm run start:provider
               To enable ERC-8004 in your provider, run in <span style={{ fontFamily: 'monospace' }}>agent/</span> and restart:
             </p>
             <div style={{ position: 'relative' }}>
-              <pre style={{ ...styles.code, margin: 0, fontSize: 12, paddingRight: 60 }}>{`npm run set-agent-id ${agentId}`}</pre>
-              <button
-                onClick={() => navigator.clipboard.writeText(`npm run set-agent-id ${agentId}`)}
-                style={{ position: 'absolute', top: 8, right: 8, border: 'none', background: 'rgba(255,255,255,0.12)', borderRadius: 4, padding: '4px 12px', cursor: 'pointer', fontSize: 13, color: 'rgba(255,255,255,0.6)' }}
-              >
-                copy
-              </button>
+              <pre style={{ ...styles.code, margin: 0, fontSize: 12, paddingRight: 40 }}>{`npm run set-agent-id ${agentId}`}</pre>
+              <CopyButton
+                text={`npm run set-agent-id ${agentId}`}
+                title="Copy command"
+                variant="onDark"
+                style={{ position: 'absolute', top: 8, right: 8 }}
+              />
             </div>
           </>
         )}

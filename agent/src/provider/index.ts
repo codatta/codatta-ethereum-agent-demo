@@ -22,6 +22,11 @@ import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
 import { startAnnotationService } from "./annotation-service.js";
 import {
+  AsyncServiceRegistry, submitTask, getTask, listTasks, startAsyncWorker, recommendRetryAfterSeconds,
+  type AsyncServiceDescriptor, type SyncServiceDescriptor,
+} from "./async-service.js";
+import { scoreAddress } from "./risk-score.js";
+import {
   provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri,
   X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS, USDC_NAME, USDC_VERSION, USDC_DECIMALS, RPC_URL,
 } from "../shared/config.js";
@@ -37,6 +42,28 @@ log.setRole("provider");
 
 const IDENTITY_FILE = path.join(import.meta.dirname, "../../provider-identity.json");
 const AGENT_INFO_FILE = path.join(import.meta.dirname, "../../agent-info.json");
+
+// Sync services this provider advertises. Both `addServiceToDid` (fresh
+// publish) and `syncAsyncServicesInProfile` (in-place refresh) read from
+// here so the two paths stay in sync.
+const SYNC_SERVICES: SyncServiceDescriptor[] = [
+  {
+    name: "annotation",
+    description: "Image annotation. One MCP call returns annotations.",
+    protocol: "mcp",
+    mcpTool: "annotate",
+    estimatedSeconds: 3,
+    avgTurnaround: "~2s",
+  },
+  {
+    name: "risk-score",
+    description: "Score an Ethereum address for risk (sanctioned / known-scam / proximity-to-risky). One MCP call returns { riskScore 0-100, labels, reasoning }.",
+    protocol: "mcp",
+    mcpTool: "risk_score",
+    estimatedSeconds: 1,
+    avgTurnaround: "<1s",
+  },
+];
 
 // ── Wallet setup ────────────────────────────────────────────────
 
@@ -136,19 +163,6 @@ async function requestInviteCode(inviter: string, clientAddress: string): Promis
   }
 }
 
-// ── Task store (async annotation) ───────────────────────────────
-interface AnnotationTask {
-  id: string;
-  status: "working" | "completed" | "failed";
-  images: string[];
-  task: string;
-  annotations?: Array<{ image: string; labels: Array<{ class: string; bbox: number[]; confidence: number }> }>;
-  feedbackAuth?: string;
-  createdAt: number;
-  completedAt?: number;
-}
-
-const taskStore = new Map<string, AnnotationTask>();
 let annotationServiceUrl = ""; // Set after mock service starts
 
 /**
@@ -232,7 +246,13 @@ async function registerDid(): Promise<bigint> {
  * DID document stays identity-only; profile JSON is the single source of truth for
  * name/description/services/etc, and the same URL is reused by ERC-8004's tokenURI.
  */
-function buildAgentProfile(didUri: string, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string) {
+function buildAgentProfile(
+  didUri: string,
+  mcpEndpoint: string,
+  a2aEndpoint: string,
+  webEndpoint: string,
+  asyncServices: AsyncServiceDescriptor[] = [],
+) {
   return {
     type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
     name: "Codatta Annotation Agent",
@@ -245,18 +265,26 @@ function buildAgentProfile(didUri: string, mcpEndpoint: string, a2aEndpoint: str
       { name: "A2A", endpoint: a2aEndpoint, version: "0.3.0" },
       { name: "DID", endpoint: didUri, version: "v1" },
     ],
+    syncServices: SYNC_SERVICES,
+    asyncServices,
     active: true,
     supportedTrust: ["reputation"],
     x402Support: true,
   };
 }
 
-async function publishProfile(didUri: string, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string) {
+async function publishProfile(
+  didUri: string,
+  mcpEndpoint: string,
+  a2aEndpoint: string,
+  webEndpoint: string,
+  asyncServices: AsyncServiceDescriptor[] = [],
+) {
   const profileUrl = `${INVITE_SERVICE_URL}/profiles/${didUri}`;
   const putRes = await fetch(profileUrl, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildAgentProfile(didUri, mcpEndpoint, a2aEndpoint, webEndpoint)),
+    body: JSON.stringify(buildAgentProfile(didUri, mcpEndpoint, a2aEndpoint, webEndpoint, asyncServices)),
   });
   if (!putRes.ok) {
     throw new Error(`Profile publish failed: HTTP ${putRes.status}`);
@@ -264,12 +292,18 @@ async function publishProfile(didUri: string, mcpEndpoint: string, a2aEndpoint: 
   return profileUrl;
 }
 
-async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpoint: string, webEndpoint: string) {
+async function addServiceToDid(
+  codattaDid: bigint,
+  mcpEndpoint: string,
+  a2aEndpoint: string,
+  webEndpoint: string,
+  asyncServices: AsyncServiceDescriptor[] = [],
+) {
   const didHex = codattaDid.toString(16);
   const didUri = hexToDidUri(didHex);
 
   log.info("Publishing agent profile to profile service...");
-  const profileUrl = await publishProfile(didUri, mcpEndpoint, a2aEndpoint, webEndpoint);
+  const profileUrl = await publishProfile(didUri, mcpEndpoint, a2aEndpoint, webEndpoint, asyncServices);
   log.success(`Profile published: ${profileUrl}`);
 
   log.info("Adding AgentProfile pointer to DID document...");
@@ -284,6 +318,44 @@ async function addServiceToDid(codattaDid: bigint, mcpEndpoint: string, a2aEndpo
   )).wait();
 
   log.success("DID document updated (#profile → profile service)");
+}
+
+/**
+ * Merge the provider's current sync + async service catalog into the existing
+ * profile on the profile service. No-op if nothing changed. Used on startup so
+ * returning providers pick up newly-declared services without re-registering.
+ */
+async function syncAsyncServicesInProfile(codattaDid: bigint, asyncServices: AsyncServiceDescriptor[]) {
+  const didUri = hexToDidUri(codattaDid.toString(16));
+  const profileUrl = `${INVITE_SERVICE_URL}/profiles/${didUri}`;
+  try {
+    const getRes = await fetch(profileUrl);
+    if (!getRes.ok) return; // no existing profile — addServiceToDid handles fresh case
+    const profile = await getRes.json() as Record<string, unknown>;
+
+    const existingAsync = Array.isArray(profile.asyncServices) ? profile.asyncServices as Array<{ name: string }> : [];
+    const asyncNames = new Set(existingAsync.map(s => s.name));
+    const mergedAsync = [...existingAsync, ...asyncServices.filter(s => !asyncNames.has(s.name))];
+
+    const existingSync = Array.isArray(profile.syncServices) ? profile.syncServices as Array<{ name: string }> : [];
+    const syncNames = new Set(existingSync.map(s => s.name));
+    const mergedSync = [...existingSync, ...SYNC_SERVICES.filter(s => !syncNames.has(s.name))];
+
+    const asyncChanged = mergedAsync.length !== existingAsync.length;
+    const syncChanged = mergedSync.length !== existingSync.length;
+    if (!asyncChanged && !syncChanged) return;
+
+    profile.asyncServices = mergedAsync;
+    profile.syncServices = mergedSync;
+    const putRes = await fetch(profileUrl, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    });
+    if (putRes.ok) log.info(`Profile refreshed (sync:${syncChanged ? "+" : "="} async:${asyncChanged ? "+" : "="})`);
+  } catch {
+    // Profile service unreachable — not fatal
+  }
 }
 
 async function registerAgent(codattaDid: bigint, _mcpEndpoint: string, _a2aEndpoint: string, _webEndpoint: string, network: ethers.Network): Promise<bigint> {
@@ -404,6 +476,24 @@ async function main() {
   const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
   const a2aEndpointUrl = `http://localhost:${A2A_PORT}`;
 
+  // ── Async service registry ────────────────────────────────────
+  //
+  // The async framework is business-agnostic: a provider declares one or more
+  // async services here and (optionally) registers an auto-handler. Without a
+  // handler, tasks sit in `pending` until someone completes them from the web
+  // inbox or from an external system that polls the invite-service queue.
+  const asyncRegistry = new AsyncServiceRegistry();
+  asyncRegistry.declare({
+    name: "demo-async",
+    description: "Framework demo service. Requires the provider to review and confirm each task in the web inbox — no auto-handler — so the async flow is visible end-to-end.",
+    avgTurnaround: "human-confirmed",
+    estimatedSeconds: 60,
+  });
+  // No auto-handler for demo-async — tasks must be completed manually via the
+  // web inbox. This is intentional for the async-flow demo. Real async services
+  // can register their own handlers here and the worker will pick them up
+  // (opt-in via ASYNC_AUTO_PROCESS=true).
+
   // ── Step 0: Start annotation backend ──────────────────────────
   log.step("Starting annotation backend");
   annotationServiceUrl = await startAnnotationService();
@@ -432,7 +522,7 @@ async function main() {
         // points here; profile data may be gone if the service restarted.
         try {
           const didUri = hexToDidUri(codattaDid.toString(16));
-          await publishProfile(didUri, mcpEndpointUrl, a2aEndpointUrl, serviceEndpointUrl);
+          await publishProfile(didUri, mcpEndpointUrl, a2aEndpointUrl, serviceEndpointUrl, asyncRegistry.descriptors());
           log.info("Profile refreshed on profile service");
         } catch (e: any) {
           log.info(`Profile refresh failed (non-fatal): ${e.message}`);
@@ -475,7 +565,7 @@ async function main() {
       codattaDid = await registerDid();
 
       log.step("Step 2/2: Add service to DID document");
-      await addServiceToDid(codattaDid, mcpEndpointUrl, a2aEndpointUrl, serviceEndpointUrl);
+      await addServiceToDid(codattaDid, mcpEndpointUrl, a2aEndpointUrl, serviceEndpointUrl, asyncRegistry.descriptors());
 
       // Save DID immediately
       saveIdentity({
@@ -505,6 +595,11 @@ async function main() {
   // Write agent info for client/query
   writeAgentInfo(agentId, did);
 
+  // Ensure async service declarations are visible to clients discovering this provider.
+  // Fresh registrations already include asyncServices via addServiceToDid; this handles
+  // the returning-provider case without an on-chain transaction.
+  await syncAsyncServicesInProfile(did, asyncRegistry.descriptors());
+
   // ── Step 4: Start MCP Server ──────────────────────────────────
   log.step("Starting MCP annotation server");
 
@@ -512,11 +607,15 @@ async function main() {
   function createMcpServerInstance(): McpServer {
     const server = new McpServer({ name: "codatta-annotation", version: "1.0.0" });
 
-    // Tool: annotate (async — returns taskId, work happens in background)
+    // Tool: annotate — true synchronous MCP call.
+    // One tools/call request blocks until the annotation is done, then returns
+    // the result in the response. No taskId, no polling. This is the native
+    // MCP request/response pattern and the canonical shape of a `syncServices`
+    // entry. Use the async framework (`submit_task`) for long-running work.
     server.tool(
       "annotate",
-      "Submit images for annotation. This is an async operation — returns a taskId immediately. " +
-      "Use get_task_status(taskId) to poll for results. Status transitions: working → completed/failed. " +
+      "Label images synchronously. One MCP call returns { annotations, feedbackAuth, agentId, did, duration }. " +
+      "Blocks until complete — suitable for short tasks (seconds). For long-running work, see `submit_task`. " +
       "In production, x402 payment is required. Clients with a Codatta DID registered via invite may have free quota.",
       {
         images: z.array(z.string()).describe("Image URLs to annotate"),
@@ -524,108 +623,169 @@ async function main() {
         labels: z.array(z.string()).optional().describe("Label set, e.g. ['car', 'pedestrian', 'traffic-light']"),
         clientAddress: z.string().optional().describe("Client wallet address for feedbackAuth"),
       },
-      async ({ images, task, clientAddress }) => {
+      async ({ images, task, labels, clientAddress }) => {
         log.event("MCP tool call", `annotate: ${images.length} images, task=${task}`);
+        const startedAt = Date.now();
 
-        const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const annotationTask: AnnotationTask = {
-          id: taskId, status: "working", images, task, createdAt: Date.now(),
-        };
-        taskStore.set(taskId, annotationTask);
-        log.info(`Task created: ${taskId}`);
+        const annotations = await executeAnnotation(images, task, labels);
+        log.success(`Annotation complete: ${annotations.length} images`);
+        if (agentId) await updateValidation(agentId);
 
-        // Execute in background
-        (async () => {
-          try {
-            log.info("Annotating...");
-            const annotations = await executeAnnotation(images, task);
-            log.success(`Annotation complete: ${annotations.length} images`);
-            if (agentId) await updateValidation(agentId);
-
-            let feedbackAuth = "";
-            try {
-              if (clientAddress && agentId) {
-                feedbackAuth = await buildFeedbackAuth({
-                  agentId, clientAddress, indexLimit: 100,
-                  expiry: Math.floor(Date.now() / 1000) + 86400,
-                  chainId: network.chainId,
-                  identityRegistry: addresses.identityRegistry,
-                  signerWallet: wallet,
-                });
-              }
-            } catch {}
-
-            annotationTask.status = "completed";
-            annotationTask.annotations = annotations;
-            annotationTask.feedbackAuth = feedbackAuth;
-            annotationTask.completedAt = Date.now();
-
-            // Report to Invite Service
-            try {
-              const dur = ((annotationTask.completedAt - annotationTask.createdAt) / 1000).toFixed(1);
-              await fetch(`${INVITE_SERVICE_URL}/service-history`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  agentId: agentId ? agentId.toString() : "",
-                  clientAddress: clientAddress || "",
-                  task, imageCount: images.length,
-                  duration: `${dur}s`, status: "completed",
-                }),
-              });
-            } catch {}
-          } catch {
-            annotationTask.status = "failed";
+        let feedbackAuth = "";
+        try {
+          if (clientAddress && agentId) {
+            feedbackAuth = await buildFeedbackAuth({
+              agentId, clientAddress, indexLimit: 100,
+              expiry: Math.floor(Date.now() / 1000) + 86400,
+              chainId: network.chainId,
+              identityRegistry: addresses.identityRegistry,
+              signerWallet: wallet,
+            });
           }
-        })();
+        } catch {}
+
+        const dur = ((Date.now() - startedAt) / 1000).toFixed(1);
+        try {
+          await fetch(`${INVITE_SERVICE_URL}/service-history`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              agentId: agentId ? agentId.toString() : "",
+              clientAddress: clientAddress || "",
+              task, imageCount: images.length,
+              duration: `${dur}s`, status: "completed",
+            }),
+          });
+        } catch {}
 
         return {
           content: [{ type: "text" as const, text: JSON.stringify({
-            taskId, status: "working", message: "Task submitted. Use get_task_status to poll for results.",
+            status: "completed",
+            annotations,
+            agentId: agentId ? agentId.toString() : null,
+            did: hexToDidUri(did.toString(16)),
+            feedbackAuth,
+            duration: `${dur}s`,
           })}],
         };
       }
     );
 
-    // Tool: get_task_status
+    // Tool: risk_score — second sync service. Sibling of annotate.
+    // Scores a wallet address against a demo blacklist + proximity map and
+    // returns a decision-grade result. Prototype; a real impl would derive
+    // blacklist + contact graph from on-chain data and third-party feeds.
     server.tool(
-      "get_task_status",
-      "Poll the status of a task returned by annotate. Returns {status: 'working'} while in progress, " +
-      "or {status: 'completed', annotations: [...], feedbackAuth: '...'} when done. " +
-      "Recommended polling interval: 1 second.",
+      "risk_score",
+      "Score an Ethereum address for risk. One MCP call returns " +
+      "{ address, riskScore 0-100, labels, reasoning, checkedAt }. " +
+      "Labels: `sanctioned`, `known-scam`, `proximity-to-risky`. " +
+      "MVP uses a demo blacklist — not real OFAC / chain-analysis data.",
       {
-        taskId: z.string().describe("Task ID returned by annotate"),
+        address: z.string().regex(/^0x[0-9a-fA-F]{40}$/).describe("Ethereum address to score (0x + 40 hex chars)"),
       },
-      async ({ taskId }) => {
-        const task = taskStore.get(taskId);
-        if (!task) {
-          return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Task not found" }) }] };
-        }
-
-        if (task.status === "completed") {
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify({
-              taskId: task.id,
-              status: task.status,
-              annotations: task.annotations,
-              agentId: agentId ? agentId.toString() : null,
-              did: hexToDidUri(did.toString(16)),
-              feedbackAuth: task.feedbackAuth || "",
-              duration: `${((task.completedAt! - task.createdAt) / 1000).toFixed(1)}s`,
-            })}],
-          };
-        }
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({
-            taskId: task.id, status: task.status,
-          })}],
-        };
+      async ({ address }) => {
+        const result = scoreAddress(address);
+        log.event("MCP tool call", `risk_score: ${address} → score=${result.riskScore} labels=[${result.labels.join(",")}]`);
+        return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
       }
     );
 
     // Note: claim_invite removed — DID registration with invite now happens on-chain
     // via InviteRegistrar.registerWithInvite(). No MCP tool needed.
+
+    // ── Async service base (generic, business-agnostic) ─────────
+    //
+    // Three tools back any async service this provider advertises in its
+    // profile's `asyncServices`. They are plumbing only — the real semantics
+    // live in the handler registered for each `serviceName`, or in whoever
+    // processes pending tasks via the invite-service inbox.
+
+    server.tool(
+      "submit_task",
+      "Submit an async task. Returns immediately with a taskId — the provider processes the task later " +
+      "(auto-handler or manual inbox). Use get_task(taskId) to check status. Supported serviceName values " +
+      "come from this provider's profile.asyncServices. This is the async counterpart to `annotate`.",
+      {
+        serviceName: z.string().describe("Async service business identifier (e.g. 'demo-async'). Must be declared in profile.asyncServices."),
+        payload: z.any().describe("Opaque JSON payload whose shape is defined by the target service."),
+        clientAddress: z.string().optional().describe("Client wallet address (for inbox attribution and feedbackAuth)."),
+        clientDid: z.string().optional().describe("Client Codatta DID."),
+        note: z.string().optional().describe("Optional note shown to the provider in the inbox."),
+      },
+      async ({ serviceName, payload, clientAddress, clientDid, note }) => {
+        const descriptors = asyncRegistry.descriptors();
+        const descriptor = descriptors.find(d => d.name === serviceName);
+        if (!descriptor) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            error: `Unknown serviceName: ${serviceName}`,
+            availableAsyncServices: descriptors.map(d => d.name),
+          })}]};
+        }
+        const task = await submitTask({
+          serviceName, payload,
+          providerAddress: wallet.address,
+          agentId: agentId ? agentId.toString() : undefined,
+          providerDid: hexToDidUri(did.toString(16)),
+          clientAddress, clientDid, note,
+        });
+        log.event("async submit", `service=${serviceName} taskId=${task.id}`);
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          taskId: task.id,
+          status: task.status,
+          serviceName,
+          createdAt: task.createdAt,
+          // Wait-time hints — analogous to HTTP 202's `Retry-After`.
+          avgTurnaround: descriptor.avgTurnaround,
+          estimatedSeconds: descriptor.estimatedSeconds,
+          retryAfterSeconds: recommendRetryAfterSeconds(descriptor.estimatedSeconds),
+        })}]};
+      }
+    );
+
+    server.tool(
+      "get_task",
+      "Query an async task by taskId. Returns full task state (status, result, error, timestamps). " +
+      "For non-terminal statuses, the response also includes `retryAfterSeconds` hinting the client when to poll next.",
+      { taskId: z.string() },
+      async ({ taskId }) => {
+        const task = await getTask(taskId);
+        if (!task) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Task not found" }) }] };
+        }
+        const terminal = task.status === "completed" || task.status === "failed" || task.status === "cancelled";
+        if (terminal) {
+          return { content: [{ type: "text" as const, text: JSON.stringify(task) }] };
+        }
+        const descriptor = asyncRegistry.descriptors().find(d => d.name === task.serviceName);
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ...task,
+          avgTurnaround: descriptor?.avgTurnaround,
+          estimatedSeconds: descriptor?.estimatedSeconds,
+          retryAfterSeconds: recommendRetryAfterSeconds(descriptor?.estimatedSeconds),
+        })}]};
+      }
+    );
+
+    server.tool(
+      "list_tasks",
+      "List async tasks, optionally filtered by serviceName, status, or clientAddress. " +
+      "Returns tasks submitted to this provider.",
+      {
+        serviceName: z.string().optional(),
+        status: z.string().optional().describe("Comma-separated list: pending,accepted,working,completed,failed,cancelled"),
+        clientAddress: z.string().optional(),
+        limit: z.number().optional(),
+      },
+      async ({ serviceName, status, clientAddress, limit }) => {
+        const res = await listTasks({
+          providerAddress: wallet.address,
+          serviceName, status, clientAddress,
+          limit: limit ? String(limit) : undefined,
+        });
+        return { content: [{ type: "text" as const, text: JSON.stringify(res) }] };
+      }
+    );
 
     return server;
   }
@@ -702,7 +862,9 @@ async function main() {
 
   mcpApp.listen(MCP_PORT, "0.0.0.0", () => {
     log.success(`MCP server running on ${mcpEndpointUrl}`);
-    log.info("  Tool: annotate(images, task, labels?, clientAddress?)");
+    log.info("  Sync  tools: annotate(images, task, labels?, clientAddress?) → annotations");
+    log.info("               risk_score(address) → { riskScore, labels, reasoning }");
+    log.info("  Async tools: submit_task / get_task / list_tasks");
   });
 
   // ── Step 5: Start A2A consultation server ──────────────────────
@@ -751,9 +913,9 @@ async function main() {
                   "**Pricing:** $0.05/image (x402 payment), or free with invite code\n\n" +
                   "**How to use (MCP):**\n" +
                   `1. Connect to MCP endpoint: ${mcpEndpointUrl}\n` +
-                  "2. Call tools/list to discover: annotate, get_task_status\n" +
-                  "3. Call annotate(images, task) → returns taskId\n" +
-                  "4. Poll get_task_status(taskId) until completed\n\n" +
+                  "2. Call tools/list to discover available tools\n" +
+                  "3. Sync: call annotate(images, task) — blocks, returns annotations in one call\n" +
+                  "4. Async: call submit_task(serviceName, payload) → poll get_task(taskId)\n\n" +
                   "**Free credits:** Reply with your wallet address to get an invite code.\n" +
                   "We can register a Codatta DID for you (no ETH needed, we pay gas).\n\n" +
                   "**Codatta also offers:** Data Validation, Data Access, CDA Reporter (coming soon).\n" +
@@ -766,7 +928,7 @@ async function main() {
                   service: "annotation",
                   provider: "Codatta",
                   mcpEndpoint: mcpEndpointUrl,
-                  mcpTools: ["annotate", "get_task_status"],
+                  mcpTools: ["annotate", "risk_score", "submit_task", "get_task", "list_tasks"],
                   pricing: { perImage: "$0.05", currency: "USDC", protocol: "x402" },
                   inviteRegistrar: addresses.inviteRegistrar,
                   supportedTasks: ["object-detection", "segmentation", "classification"],
@@ -978,6 +1140,27 @@ async function main() {
     log.info("  GET  /health    — health check");
     log.waiting("Waiting for requests...");
   });
+
+  // ── Async worker (opt-in) ─────────────────────────────────────
+  //
+  // Default: OFF — pending tasks stay in the provider's inbox so humans (or
+  // external systems) can process them in the web dashboard. Set
+  // ASYNC_AUTO_PROCESS=true to let registered handlers drain the queue.
+  const asyncDescriptors = asyncRegistry.descriptors();
+  if (asyncDescriptors.length > 0) {
+    log.step("Async service base");
+    for (const d of asyncDescriptors) {
+      const hasHandler = asyncRegistry.hasHandler(d.name);
+      log.info(`  ${d.name}${d.avgTurnaround ? ` (~${d.avgTurnaround})` : ""}${hasHandler ? " [handler registered]" : " [manual only]"}`);
+    }
+    log.info("  MCP tools: submit_task, get_task, list_tasks");
+    if (process.env.ASYNC_AUTO_PROCESS === "true") {
+      startAsyncWorker({ providerAddress: wallet.address, registry: asyncRegistry });
+      log.success("Async worker started (ASYNC_AUTO_PROCESS=true)");
+    } else {
+      log.info("Async worker disabled — set ASYNC_AUTO_PROCESS=true to auto-handle pending tasks");
+    }
+  }
 }
 
 main().catch((err) => {

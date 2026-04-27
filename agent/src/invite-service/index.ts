@@ -63,6 +63,30 @@ interface ServiceRecord {
   timestamp: string;
 }
 
+// ── Generic async task model ─────────────────────────────────────
+// Business-agnostic. `serviceName` identifies the service (e.g. "annotation-review",
+// "data-validation", "demo-async"). `payload` and `result` are opaque JSON.
+type AsyncTaskStatus = "pending" | "accepted" | "working" | "completed" | "failed" | "cancelled";
+
+interface AsyncTask {
+  id: string;
+  agentId: string;                // provider's ERC-8004 agentId ("" if DID-only)
+  providerAddress: string;        // provider's wallet (used for inbox filtering)
+  providerDid: string | null;     // did:codatta:<uuid> of provider (optional)
+  serviceName: string;            // opaque business identifier
+  clientAddress: string;
+  clientDid: string | null;
+  payload: unknown;               // free-form JSON
+  status: AsyncTaskStatus;
+  result: unknown | null;         // free-form JSON (set on complete)
+  error: string | null;           // set on fail
+  note: string | null;            // provider-visible note
+  createdAt: string;
+  acceptedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
 interface StoreData {
   nonceCounter: number;
   invites: Record<string, InviteRecord>;
@@ -71,6 +95,8 @@ interface StoreData {
   serviceHistory: ServiceRecord[];
   // Agent profile JSON (ERC-8004 registrationFile format), keyed by DID (did:codatta:uuid)
   profiles: Record<string, any>;
+  // Generic async task queue — base for any async service (annotation-review, validation, etc.)
+  asyncTasks: Record<string, AsyncTask>;
 }
 
 let store: StoreData = {
@@ -80,6 +106,7 @@ let store: StoreData = {
   agentRegistrations: {},
   serviceHistory: [],
   profiles: {},
+  asyncTasks: {},
 };
 
 function loadStore() {
@@ -87,8 +114,8 @@ function loadStore() {
     if (fs.existsSync(DATA_FILE)) {
       const loaded = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
       // Backfill missing keys from older data files
-      store = { ...store, ...loaded, profiles: loaded.profiles || {} };
-      log.info(`Loaded data: ${Object.keys(store.invites).length} invites, ${store.hiddenAgents.length} hidden, ${Object.keys(store.agentRegistrations).length} registrations, ${Object.keys(store.profiles).length} profiles`);
+      store = { ...store, ...loaded, profiles: loaded.profiles || {}, asyncTasks: loaded.asyncTasks || {} };
+      log.info(`Loaded data: ${Object.keys(store.invites).length} invites, ${store.hiddenAgents.length} hidden, ${Object.keys(store.agentRegistrations).length} registrations, ${Object.keys(store.profiles).length} profiles, ${Object.keys(store.asyncTasks).length} async tasks`);
     }
   } catch (err: any) {
     log.info("No existing data file, starting fresh");
@@ -525,6 +552,144 @@ async function main() {
     res.json({ status: "ok", did });
   });
 
+  // ── Async task queue (generic base for async services) ──────
+  //
+  // Any service built on the async framework stores its tasks here.
+  // `serviceName` identifies the business (opaque string — e.g. "annotation-review",
+  // "data-validation", "demo-async"). `payload` and `result` are free-form JSON
+  // whose shape is defined by the service itself, not this layer.
+
+  const TERMINAL_STATUSES: AsyncTaskStatus[] = ["completed", "failed", "cancelled"];
+  const ALLOWED_TRANSITIONS: Record<AsyncTaskStatus, AsyncTaskStatus[]> = {
+    pending: ["accepted", "working", "failed", "cancelled"],
+    accepted: ["working", "completed", "failed", "cancelled"],
+    working: ["completed", "failed", "cancelled"],
+    completed: [],
+    failed: [],
+    cancelled: [],
+  };
+
+  function transitionTask(task: AsyncTask, next: AsyncTaskStatus, extra: Partial<AsyncTask> = {}): AsyncTask {
+    if (!ALLOWED_TRANSITIONS[task.status].includes(next)) {
+      throw new Error(`Cannot transition task ${task.id} from ${task.status} to ${next}`);
+    }
+    const now = new Date().toISOString();
+    const updated: AsyncTask = { ...task, ...extra, status: next };
+    if (next === "accepted" && !updated.acceptedAt) updated.acceptedAt = now;
+    if (next === "working" && !updated.startedAt) updated.startedAt = now;
+    if (TERMINAL_STATUSES.includes(next)) updated.completedAt = now;
+    store.asyncTasks[task.id] = updated;
+    saveStore();
+    return updated;
+  }
+
+  // Create a task (provider's MCP handler calls this on behalf of a client)
+  app.post("/tasks", (req, res) => {
+    const { agentId, providerAddress, providerDid, serviceName, clientAddress, clientDid, payload, note } = req.body || {};
+    if (!providerAddress || !serviceName) {
+      res.status(400).json({ error: "providerAddress and serviceName required" });
+      return;
+    }
+    const id = `atk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const task: AsyncTask = {
+      id,
+      agentId: agentId ? String(agentId) : "",
+      providerAddress: String(providerAddress),
+      providerDid: providerDid || null,
+      serviceName: String(serviceName),
+      clientAddress: clientAddress ? String(clientAddress) : "",
+      clientDid: clientDid || null,
+      payload: payload ?? null,
+      status: "pending",
+      result: null,
+      error: null,
+      note: note || null,
+      createdAt: new Date().toISOString(),
+      acceptedAt: null,
+      startedAt: null,
+      completedAt: null,
+    };
+    store.asyncTasks[id] = task;
+    saveStore();
+    log.info(`Task created: ${id} service=${serviceName} agent=${task.agentId || "(none)"} client=${task.clientAddress.slice(0, 10)}...`);
+    res.status(201).json(task);
+  });
+
+  // Get single task
+  app.get("/tasks/:taskId", (req, res) => {
+    const task = store.asyncTasks[req.params.taskId];
+    if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+    res.json(task);
+  });
+
+  // List tasks — filter by providerAddress (owner inbox), agentId, clientAddress,
+  // serviceName, status. All filters optional; multiple are AND-combined.
+  //
+  // `counts` reflects the totals *before* the `status` filter so filter UIs
+  // can show a stable badge for every bucket. Non-status filters (provider,
+  // agent, client, serviceName) still apply — counts are the full distribution
+  // of the inbox being viewed, not the global distribution.
+  app.get("/tasks", (req, res) => {
+    const { providerAddress, agentId, clientAddress, serviceName, status, limit } = req.query as Record<string, string>;
+    let scoped = Object.values(store.asyncTasks);
+    if (providerAddress) scoped = scoped.filter(t => t.providerAddress.toLowerCase() === providerAddress.toLowerCase());
+    if (agentId) scoped = scoped.filter(t => t.agentId === agentId);
+    if (clientAddress) scoped = scoped.filter(t => t.clientAddress.toLowerCase() === clientAddress.toLowerCase());
+    if (serviceName) scoped = scoped.filter(t => t.serviceName === serviceName);
+
+    // Counts over the scoped set (before the status filter).
+    const counts: Record<AsyncTaskStatus, number> = { pending: 0, accepted: 0, working: 0, completed: 0, failed: 0, cancelled: 0 };
+    for (const t of scoped) counts[t.status]++;
+
+    // Apply status filter only to the returned items.
+    let items = scoped;
+    if (status) {
+      const wanted = status.split(",");
+      items = items.filter(t => wanted.includes(t.status));
+    }
+    items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const cap = Math.max(1, Math.min(500, parseInt(limit || "100")));
+    res.json({ total: items.length, counts, tasks: items.slice(0, cap) });
+  });
+
+  // State transitions — all take optional { note } and action-specific fields.
+  app.post("/tasks/:taskId/accept", (req, res) => {
+    const task = store.asyncTasks[req.params.taskId];
+    if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+    try { res.json(transitionTask(task, "accepted", { note: req.body?.note ?? task.note })); }
+    catch (err: any) { res.status(409).json({ error: err.message }); }
+  });
+
+  app.post("/tasks/:taskId/work", (req, res) => {
+    const task = store.asyncTasks[req.params.taskId];
+    if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+    try { res.json(transitionTask(task, "working", { note: req.body?.note ?? task.note })); }
+    catch (err: any) { res.status(409).json({ error: err.message }); }
+  });
+
+  app.post("/tasks/:taskId/complete", (req, res) => {
+    const task = store.asyncTasks[req.params.taskId];
+    if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+    const { result, note } = req.body || {};
+    try { res.json(transitionTask(task, "completed", { result: result ?? null, note: note ?? task.note })); }
+    catch (err: any) { res.status(409).json({ error: err.message }); }
+  });
+
+  app.post("/tasks/:taskId/fail", (req, res) => {
+    const task = store.asyncTasks[req.params.taskId];
+    if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+    const { error, note } = req.body || {};
+    try { res.json(transitionTask(task, "failed", { error: error || "failed", note: note ?? task.note })); }
+    catch (err: any) { res.status(409).json({ error: err.message }); }
+  });
+
+  app.post("/tasks/:taskId/cancel", (req, res) => {
+    const task = store.asyncTasks[req.params.taskId];
+    if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+    try { res.json(transitionTask(task, "cancelled", { note: req.body?.note ?? task.note })); }
+    catch (err: any) { res.status(409).json({ error: err.message }); }
+  });
+
   // ── Faucet ──────────────────────────────────────────────────
 
   const FAUCET_AMOUNT = ethers.parseEther("1.0");
@@ -566,6 +731,10 @@ async function main() {
     log.info("  PUT  /agents/:id/registration     — save registration progress");
     log.info("  GET  /registrations/pending/:owner — pending registrations");
     log.info("  PUT/GET/DELETE /profiles/:did     — agent profile (ERC-8004 registrationFile)");
+    log.info("  POST /tasks                       — create async task");
+    log.info("  GET  /tasks?providerAddress=...   — inbox / list tasks");
+    log.info("  GET  /tasks/:id                   — get single task");
+    log.info("  POST /tasks/:id/{accept,work,complete,fail,cancel} — state transitions");
     log.waiting("Ready");
   });
 }
