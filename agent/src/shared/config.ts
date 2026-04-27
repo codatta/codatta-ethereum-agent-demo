@@ -31,7 +31,13 @@ export const INVITE_SERVICE_URL = process.env.INVITE_SERVICE_URL || "http://127.
 // x402 payment config
 export const X402_ENABLED = process.env.X402_ENABLED !== "false";
 export const USDC_PRICE_PER_IMAGE = parseFloat(process.env.USDC_PRICE_PER_IMAGE || "0.05");
-export const USDC_ADDRESS = process.env.USDC_ADDRESS!; // MockERC3009 on Anvil
+export const USDC_ADDRESS = process.env.USDC_ADDRESS!; // ERC-3009 token address (MockERC3009 on Anvil)
+// EIP-712 domain for the ERC-3009 token. Defaults match MockERC3009.sol;
+// override for real USDC (name="USD Coin", version="2").
+export const USDC_NAME = process.env.USDC_NAME || "MockERC3009";
+export const USDC_VERSION = process.env.USDC_VERSION || "1";
+export const USDC_DECIMALS = parseInt(process.env.USDC_DECIMALS || "6");
+export const RPC_URL = rpcUrl;
 
 /** Convert uint128 hex to did:codatta:<uuid> format */
 export function hexToDidUri(hex: string): string {

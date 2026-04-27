@@ -132,10 +132,12 @@ async function generateInviteCode(inviter: string, clientAddress: string): Promi
   nonce: number;
   signature: string;
 } | null> {
-  // Return existing if already generated
+  // Reuse an existing unclaimed invite for this (inviter, client) pair.
+  // Claimed invites are one-shot on-chain; issue a fresh nonce instead.
   for (const record of Object.values(store.invites)) {
     if (record.inviter.toLowerCase() === inviter.toLowerCase() &&
-        record.clientAddress.toLowerCase() === clientAddress.toLowerCase()) {
+        record.clientAddress.toLowerCase() === clientAddress.toLowerCase() &&
+        !record.claimed) {
       return { nonce: record.nonce, signature: record.signature };
     }
   }
@@ -171,6 +173,31 @@ async function startEventListener() {
   const inviteRegistrar = new ethers.Contract(
     addresses.inviteRegistrar, InviteRegistrarABI, provider
   );
+
+  // On startup, reconcile nonceCounter with on-chain usage. Without this,
+  // wiping invite-service-data.json while the chain retains used nonces causes
+  // the service to re-issue nonce=1 and the contract rejects with
+  // "Invite already used".
+  try {
+    const past = await inviteRegistrar.queryFilter(
+      inviteRegistrar.filters.InviteRegistered(),
+      0,
+      "latest",
+    );
+    let maxNonce = 0;
+    for (const evt of past) {
+      const args = (evt as ethers.EventLog).args;
+      const nonce = Number((args?.nonce ?? args?.[3]) as bigint);
+      if (nonce > maxNonce) maxNonce = nonce;
+    }
+    if (store.nonceCounter <= maxNonce) {
+      log.info(`Bumping nonceCounter ${store.nonceCounter} → ${maxNonce + 1} (on-chain used max=${maxNonce})`);
+      store.nonceCounter = maxNonce + 1;
+      saveStore();
+    }
+  } catch (e: any) {
+    log.info(`Nonce reconciliation failed (non-fatal): ${e.message}`);
+  }
 
   inviteRegistrar.on("InviteRegistered", (identifier: bigint, owner: string, inviter: string, nonce: bigint) => {
     const n = nonce.toString();

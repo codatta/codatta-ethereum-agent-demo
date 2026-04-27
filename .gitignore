@@ -10,3 +10,5 @@ agent/invite-service-data.json
 agent/async-client-state.json
 # Stray root package-lock from accidental npm install at repo root (no package.json here)
 /package-lock.json
+foundry.lock
+.omc/
