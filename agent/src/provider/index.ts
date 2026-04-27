@@ -29,8 +29,12 @@ import { scoreAddress } from "./risk-score.js";
 import {
   provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri,
   X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS, USDC_NAME, USDC_VERSION, USDC_DECIMALS, RPC_URL,
+  X402_FACILITATOR_URL,
 } from "../shared/config.js";
-import { createX402Middleware, type X402Config } from "../shared/x402.js";
+import {
+  createX402Middleware, getBazaarCatalog, registerBazaarResource,
+  type X402Config,
+} from "../shared/x402.js";
 import {
   DIDRegistrarABI, DIDRegistryABI,
   IdentityRegistryABI, ValidationRegistryABI, ReputationRegistryABI,
@@ -452,6 +456,7 @@ async function main() {
   log.info("Address:", wallet.address);
 
   // ── x402 payment config ────────────────────────────────────────
+  const httpAnnotateUrl = `http://localhost:${PROVIDER_PORT}/annotate`;
   const x402Config: X402Config = {
     enabled: X402_ENABLED,
     priceUsd: USDC_PRICE_PER_IMAGE,
@@ -462,9 +467,49 @@ async function main() {
     tokenName: USDC_NAME,
     tokenVersion: USDC_VERSION,
     tokenDecimals: USDC_DECIMALS,
+    facilitatorUrl: X402_FACILITATOR_URL || undefined,
+    bazaar: {
+      resourceUrl: httpAnnotateUrl,
+      description: "Image annotation (object detection / segmentation / classification) over HTTP POST.",
+      mimeType: "application/json",
+      declaration: {
+        method: "POST",
+        bodyType: "json",
+        input: { images: ["https://example.com/img.jpg"], task: "object-detection", labels: ["car"], clientAddress: "0x..." },
+        inputSchema: {
+          type: "object",
+          properties: {
+            images: { type: "array", items: { type: "string", format: "uri" }, description: "Image URLs to annotate" },
+            task: { type: "string", enum: ["object-detection", "segmentation", "classification"] },
+            labels: { type: "array", items: { type: "string" }, description: "Optional label set" },
+            clientAddress: { type: "string", description: "Client wallet address for feedbackAuth" },
+          },
+          required: ["images", "task"],
+        },
+        output: {
+          example: {
+            status: "completed",
+            annotations: [{ image: "https://example.com/img.jpg", labels: [{ class: "car", bbox: [10, 20, 30, 40], confidence: 0.92 }] }],
+            agentId: "1",
+            feedbackAuth: "0x…",
+          },
+          schema: {
+            type: "object",
+            properties: {
+              status: { type: "string" },
+              annotations: { type: "array" },
+              agentId: { type: ["string", "null"] },
+              feedbackAuth: { type: "string" },
+            },
+            required: ["status", "annotations"],
+          },
+        },
+      },
+    },
   };
   if (x402Config.enabled) {
     log.info(`x402: $${x402Config.priceUsd}/call, payTo=${wallet.address.slice(0, 10)}... (ERC-3009)`);
+    log.info(`x402: facilitator=${X402_FACILITATOR_URL || "in-process"}`);
   } else {
     log.info("x402: disabled (free dev mode — set X402_ENABLED=true to enable)");
   }
@@ -810,7 +855,76 @@ async function main() {
   // x402 gate — charges only for JSON-RPC `tools/call` targeting billable tools.
   // Free passes: initialize, tools/list, notifications, get_task_status (polling), etc.
   const BILLABLE_MCP_TOOLS = new Set(["annotate"]);
-  const x402McpMiddleware = createX402Middleware({ ...x402Config, routePath: "/mcp" }, wallet);
+  // /mcp gates payment for billable tools (currently `annotate`). The MCP
+  // bazaar entries are registered separately below — keep this middleware
+  // focused on payment so we don't mix the http-route declaration with
+  // per-tool MCP discovery info.
+  const x402McpMiddleware = createX402Middleware(
+    { ...x402Config, routePath: "/mcp", bazaar: undefined },
+    wallet,
+  );
+
+  // Register MCP-protocol bazaar entries for the two sync services this
+  // provider advertises. annotate is paid (mirrors x402Config); risk_score
+  // is free for now (accepts: []).
+  if (x402Config.enabled) {
+    const network_ = `eip155:${Number(network.chainId)}` as const;
+    registerBazaarResource({
+      resourceUrl: `${mcpEndpointUrl}#annotate`,
+      type: "mcp",
+      description: "MCP `annotate` tool — synchronous image annotation. One call returns annotations + feedbackAuth.",
+      mimeType: "application/json",
+      accepts: [{
+        scheme: "exact",
+        network: network_,
+        asset: USDC_ADDRESS,
+        amount: BigInt(Math.round(USDC_PRICE_PER_IMAGE * 10 ** USDC_DECIMALS)).toString(),
+        payTo: wallet.address,
+        maxTimeoutSeconds: 60,
+        extra: { name: USDC_NAME, version: USDC_VERSION },
+      }],
+      declaration: {
+        toolName: "annotate",
+        description: "Label images synchronously. One call returns { annotations, feedbackAuth, agentId, did, duration }.",
+        transport: "streamable-http",
+        inputSchema: {
+          type: "object",
+          properties: {
+            images: { type: "array", items: { type: "string" }, description: "Image URLs" },
+            task: { type: "string", enum: ["object-detection", "segmentation", "classification"] },
+            labels: { type: "array", items: { type: "string" } },
+            clientAddress: { type: "string" },
+          },
+          required: ["images", "task"],
+        },
+        example: { images: ["https://example.com/img.jpg"], task: "object-detection" },
+        output: {
+          example: { status: "completed", annotations: [], agentId: "1", did: "did:codatta:…", feedbackAuth: "0x…", duration: "1.2s" },
+        },
+      },
+    });
+    registerBazaarResource({
+      resourceUrl: `${mcpEndpointUrl}#risk_score`,
+      type: "mcp",
+      description: "MCP `risk_score` tool — score an Ethereum address (sanctioned / known-scam / proximity-to-risky). Free.",
+      mimeType: "application/json",
+      accepts: [],
+      declaration: {
+        toolName: "risk_score",
+        description: "Score an Ethereum address for risk. Returns { address, riskScore 0-100, labels, reasoning, checkedAt }.",
+        transport: "streamable-http",
+        inputSchema: {
+          type: "object",
+          properties: { address: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$" } },
+          required: ["address"],
+        },
+        example: { address: "0x0000000000000000000000000000000000000000" },
+        output: {
+          example: { address: "0x...", riskScore: 0, labels: [], reasoning: "no flags", checkedAt: "2026-04-27T00:00:00Z" },
+        },
+      },
+    });
+  }
   mcpApp.use((req, res, next) => {
     if (req.method !== "POST" || req.path !== "/mcp") return next();
     const body = req.body as { method?: string; params?: { name?: string } } | undefined;
@@ -1121,6 +1235,19 @@ async function main() {
     });
   });
 
+  // x402 Bazaar discovery — lists this provider's catalogued resources.
+  // In in-process facilitator mode this is the canonical discovery endpoint;
+  // when X402_FACILITATOR_URL points at a public bazaar, that bazaar's own
+  // listResources is authoritative and this endpoint stays as a local mirror.
+  app.get("/discovery/resources", (req, res) => {
+    const params = {
+      type: typeof req.query.type === "string" ? req.query.type : undefined,
+      limit: typeof req.query.limit === "string" ? parseInt(req.query.limit) : undefined,
+      offset: typeof req.query.offset === "string" ? parseInt(req.query.offset) : undefined,
+    };
+    res.json(getBazaarCatalog(params));
+  });
+
   app.get("/health", (_req, res) => {
     res.json({
       status: "ok",
@@ -1136,8 +1263,9 @@ async function main() {
 
   app.listen(PROVIDER_PORT, "0.0.0.0", () => {
     log.success(`HTTP service running on http://localhost:${PROVIDER_PORT}`);
-    log.info("  POST /annotate  — REST endpoint");
-    log.info("  GET  /health    — health check");
+    log.info("  POST /annotate            — REST endpoint");
+    log.info("  GET  /discovery/resources — x402 Bazaar catalog");
+    log.info("  GET  /health              — health check");
     log.waiting("Waiting for requests...");
   });
 
