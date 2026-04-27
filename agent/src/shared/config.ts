@@ -37,6 +37,9 @@ export const USDC_ADDRESS = process.env.USDC_ADDRESS!; // ERC-3009 token address
 export const USDC_NAME = process.env.USDC_NAME || "MockERC3009";
 export const USDC_VERSION = process.env.USDC_VERSION || "1";
 export const USDC_DECIMALS = parseInt(process.env.USDC_DECIMALS || "6");
+// Empty = use the in-process x402Facilitator (default). Set to a public
+// facilitator URL (e.g. https://x402.org/facilitator) to delegate verify/settle.
+export const X402_FACILITATOR_URL = process.env.X402_FACILITATOR_URL || "";
 export const RPC_URL = rpcUrl;
 
 /** Convert uint128 hex to did:codatta:<uuid> format */
