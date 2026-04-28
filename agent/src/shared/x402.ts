@@ -38,6 +38,9 @@ import { paymentMiddleware } from "@x402/express";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import {
   ExactEvmScheme as ClientExactEvmScheme,
+  PERMIT2_ADDRESS,
+  createPermit2ApprovalTx,
+  getPermit2AllowanceReadParams,
   toClientEvmSigner,
   toFacilitatorEvmSigner,
 } from "@x402/evm";
@@ -63,6 +66,9 @@ export interface BazaarRouteOptions {
   mimeType?: string;
 }
 
+/** How the asset is transferred from payer to payee in the exact scheme. */
+export type X402TransferMethod = "eip3009" | "permit2";
+
 export interface X402Config {
   enabled: boolean;
   priceUsd: number;
@@ -74,6 +80,13 @@ export interface X402Config {
   tokenVersion: string;
   tokenDecimals: number;
   routePath?: string;
+  /**
+   * Asset transfer method. "eip3009" (default) uses transferWithAuthorization;
+   * "permit2" uses Permit2 + x402ExactPermit2Proxy and works with any ERC-20.
+   * Permit2 mode requires the payer to have approved the canonical Permit2
+   * contract once per token. The client wrapper handles this transparently.
+   */
+  transferMethod?: X402TransferMethod;
   /**
    * If set, route verify/settle through the public facilitator at this URL
    * (HTTPFacilitatorClient) instead of running an in-process x402Facilitator.
@@ -148,6 +161,21 @@ function toAtomicAmount(priceUsd: number, decimals: number): string {
   return BigInt(Math.round(priceUsd * 10 ** decimals)).toString();
 }
 
+/**
+ * Build the `extra` field for a payment requirement based on transfer method.
+ *
+ * EIP-3009 path needs the EIP-712 domain (name/version) so the client can sign
+ * TransferWithAuthorization. Permit2 path signs against the Permit2 contract's
+ * own domain instead, so we surface only the asset transfer method discriminator
+ * — extra fields here would be ignored (and may confuse stricter facilitators).
+ */
+function buildExtraForConfig(config: X402Config): Record<string, unknown> {
+  if (config.transferMethod === "permit2") {
+    return { assetTransferMethod: "permit2" };
+  }
+  return { name: config.tokenName, version: config.tokenVersion };
+}
+
 function buildPaymentRequirementsForConfig(config: X402Config, network: Network): PaymentRequirements {
   return {
     scheme: "exact",
@@ -156,7 +184,7 @@ function buildPaymentRequirementsForConfig(config: X402Config, network: Network)
     amount: toAtomicAmount(config.priceUsd, config.tokenDecimals),
     payTo: config.payTo,
     maxTimeoutSeconds: 60,
-    extra: { name: config.tokenName, version: config.tokenVersion },
+    extra: buildExtraForConfig(config),
   };
 }
 
@@ -222,7 +250,7 @@ export function createX402Middleware(
           price: {
             amount: toAtomicAmount(config.priceUsd, config.tokenDecimals),
             asset: config.tokenAddress,
-            extra: { name: config.tokenName, version: config.tokenVersion },
+            extra: buildExtraForConfig(config),
           },
           maxTimeoutSeconds: 60,
         },
@@ -250,8 +278,9 @@ export function createX402Middleware(
   }
 
   const mode = config.facilitatorUrl ? `remote(${config.facilitatorUrl})` : "in-process";
+  const transferMethod = config.transferMethod ?? "eip3009";
   console.log(
-    `[x402] enabled: POST ${routePath}, $${config.priceUsd}, asset=${config.tokenAddress.slice(0, 10)}…, payTo=${config.payTo.slice(0, 10)}…, facilitator=${mode}` +
+    `[x402] enabled: POST ${routePath}, $${config.priceUsd}, asset=${config.tokenAddress.slice(0, 10)}…, payTo=${config.payTo.slice(0, 10)}…, transfer=${transferMethod}, facilitator=${mode}` +
     (config.bazaar ? `, bazaar=${config.bazaar.resourceUrl}` : ""),
   );
 
@@ -259,8 +288,15 @@ export function createX402Middleware(
 }
 
 /**
- * Wrap `fetch` so 402 responses are auto-handled by signing an EIP-3009
- * TransferWithAuthorization with `clientWallet` and retrying the request.
+ * Wrap `fetch` so 402 responses are auto-handled by signing the appropriate
+ * exact-scheme payload (EIP-3009 or Permit2) with `clientWallet` and retrying.
+ *
+ * For `transferMethod === "permit2"`, additionally:
+ *   - Before the first request, check the payer's Permit2 allowance for the
+ *     token. If it's below `priceUsd`, send a one-time `approve(PERMIT2, max)`
+ *     transaction via `clientWallet` and wait for the receipt.
+ *   - If the second request still returns HTTP 412 (`permit2_allowance_required`,
+ *     e.g. due to a race or stale allowance read), re-run approval and retry once.
  */
 export function wrapFetchWithX402(
   clientWallet: ethers.Wallet,
@@ -275,6 +311,78 @@ export function wrapFetchWithX402(
 
   const signer = toClientEvmSigner(account, publicClient);
   const client = new x402Client().register(network, new ClientExactEvmScheme(signer));
+  const innerFetch = wrapFetchWithPayment(fetch, client) as typeof fetch;
 
-  return wrapFetchWithPayment(fetch, client) as typeof fetch;
+  if ((config.transferMethod ?? "eip3009") !== "permit2") {
+    return innerFetch;
+  }
+
+  const ownerAddress = account.address;
+  const requiredAmount = BigInt(toAtomicAmount(config.priceUsd, config.tokenDecimals));
+  const ensureApproved = () => ensurePermit2Approved({
+    clientWallet,
+    publicClient,
+    tokenAddress: config.tokenAddress,
+    ownerAddress,
+    requiredAmount,
+  });
+
+  return (async (input, init) => {
+    await ensureApproved();
+    const res = await innerFetch(input as Parameters<typeof fetch>[0], init);
+    if (res.status !== 412) return res;
+    // The facilitator declined with `permit2_allowance_required` even though
+    // we believed allowance was sufficient — pre-check raced or token reverted
+    // the approval. Re-approve and try once more.
+    console.log("[x402] 412 permit2_allowance_required → re-approving and retrying");
+    await ensureApproved();
+    return innerFetch(input as Parameters<typeof fetch>[0], init);
+  }) as typeof fetch;
 }
+
+interface EnsurePermit2ApprovedOptions {
+  clientWallet: ethers.Wallet;
+  publicClient: ReturnType<typeof createPublicClient>;
+  tokenAddress: `0x${string}`;
+  ownerAddress: `0x${string}`;
+  requiredAmount: bigint;
+}
+
+/**
+ * Idempotent: read Permit2 allowance and send `approve(PERMIT2, max)` if it's
+ * insufficient. Waits for the receipt before returning so the facilitator
+ * sees the new allowance on its next read.
+ */
+async function ensurePermit2Approved(opts: EnsurePermit2ApprovedOptions): Promise<void> {
+  const readParams = getPermit2AllowanceReadParams({
+    tokenAddress: opts.tokenAddress,
+    ownerAddress: opts.ownerAddress,
+  });
+  const allowance = (await opts.publicClient.readContract(readParams)) as bigint;
+  if (allowance >= opts.requiredAmount) return;
+
+  console.log(
+    `[x402] Permit2 allowance ${allowance} < required ${opts.requiredAmount}; sending approve(PERMIT2, max)…`,
+  );
+  const tx = createPermit2ApprovalTx(opts.tokenAddress);
+  const sent = await opts.clientWallet.sendTransaction({
+    to: tx.to,
+    data: tx.data,
+  });
+  const receipt = await sent.wait();
+  if (!receipt || receipt.status !== 1) {
+    throw new Error(`Permit2 approval tx failed: ${sent.hash}`);
+  }
+  console.log(`[x402] Permit2 approval confirmed in tx ${sent.hash}`);
+  // Best-effort sanity read so a downstream race surfaces here, not at 412.
+  const after = (await opts.publicClient.readContract(readParams)) as bigint;
+  if (after < opts.requiredAmount) {
+    throw new Error(
+      `Permit2 approval did not raise allowance (still ${after}); check token's approve semantics`,
+    );
+  }
+}
+
+// Re-export the canonical Permit2 address so callers can reference it without
+// pulling in @x402/evm directly.
+export { PERMIT2_ADDRESS };
