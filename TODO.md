@@ -64,7 +64,6 @@
 
 ## Web Dashboard
 
-- [ ] **BUG: My Agents hidden filter 不生效** — filter 逻辑正确（console log 确认），但 UI 仍显示全部 agent，疑似 React 渲染/状态同步问题
 - [ ] **Invite Service 统一管理 Agent 列表** — Provider/Client 从 Invite Service 获取 agent 信息，去掉 agent-info.json 依赖。Web 注册和 Provider 程序注册统一入口
 - [ ] **Agent 活跃检测** — Services 页面过滤长期无活动的 Agent（后续，可能需要心跳机制或链上最后活跃时间）
 - [ ] **链上数据索引** — 当前从 block 0 遍历事件，生产环境需要索引服务（The Graph 或自建 indexer）
@@ -73,3 +72,14 @@
 
 - [ ] **项目目录结构重组** — 合约移到 contracts/、agent/ 和 web/ 保持不变，Foundry 配置（foundry.toml、remappings.txt、lib/）移入 contracts/，更新所有引用路径（deployment.json、sync-env.sh、web contracts.ts 等）
 - [x] **DID 合约回迁 codatta-did repo** — 当前 src/did/ 是从 codatta-did 复制的，InviteRegistrar 也写在这里。需要将改动合并回 codatta-did 项目，这边改为 submodule 引用
+
+## From x402-real-deploy (PR #5) — 2026-04-27
+
+- [ ] **Web Dashboard 接 Base Sepolia** — chainId 改 84532、contracts.ts 重新生成、web/.env.example 加 Sepolia RPC，独立任务（agent 已支持，web 端未跟进）
+- [ ] **公共 facilitator 接入评估** — Coinbase CDP / x402.org，等当前 in-process facilitator 在 Sepolia 跑通后再评估
+
+## From x402-bazaar (PR #6) — 2026-04-27
+
+- [ ] **真切公共 facilitator 运行** — `X402_FACILITATOR_URL=https://x402.org/facilitator`（或 Coinbase CDP），资金 + key 准备好后做。代码路径已 ready，仅运行时未验证
+- [ ] **Web Dashboard 展示 Bazaar discovery** — deferred，等公共 facilitator（上一条）跑通再做。in-process 模式下单 provider 自己 discover 自己没意义，不做本地 demo 版本
+- [ ] **Solana 多链支持** — 当前 demo 只 Base Sepolia EVM，按生态推进决定是否做

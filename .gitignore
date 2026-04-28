@@ -12,3 +12,4 @@ agent/async-client-state.json
 /package-lock.json
 foundry.lock
 .omc/
+.worktrees/
