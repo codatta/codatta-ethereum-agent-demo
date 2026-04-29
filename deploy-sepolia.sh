@@ -7,6 +7,15 @@
 # Required env (read from agent/.env):
 #   SEPOLIA_RPC_URL        Base Sepolia RPC endpoint
 #   DEPLOYER_PRIVATE_KEY   funded deployer key (needs Base Sepolia ETH for gas)
+#
+# Optional env (reuse an already-deployed DID stack instead of redeploying it):
+#   SKIP_DID=true          skip DIDRegistry / DIDRegistrar / InviteRegistrar deploys
+#   DID_REGISTRY=0x...     existing DIDRegistry (proxy) address — required if SKIP_DID
+#   DID_REGISTRAR=0x...    existing DIDRegistrar address — required if SKIP_DID
+#   INVITE_REGISTRAR=0x... existing InviteRegistrar address — required if SKIP_DID
+#   In skip mode the script writes those addresses straight into deployment.json
+#   without touching DIDRegistry.updateRegistrars (the existing stack is assumed
+#   to already authorize both registrars).
 
 set -e
 
@@ -35,6 +44,23 @@ fi
 if [ -z "${DEPLOYER_PRIVATE_KEY:-}" ]; then
   echo "✗ DEPLOYER_PRIVATE_KEY is empty in $ENV_FILE"
   exit 1
+fi
+
+# When reusing an existing DID stack, fail fast if any of the three addresses
+# are missing — forge's vm.envAddress() error is ugly and burns gas-quote time.
+if [ "${SKIP_DID:-}" = "true" ]; then
+  missing=()
+  [ -z "${DID_REGISTRY:-}" ] && missing+=("DID_REGISTRY")
+  [ -z "${DID_REGISTRAR:-}" ] && missing+=("DID_REGISTRAR")
+  [ -z "${INVITE_REGISTRAR:-}" ] && missing+=("INVITE_REGISTRAR")
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "✗ SKIP_DID=true but missing in $ENV_FILE: ${missing[*]}"
+    exit 1
+  fi
+  echo "  Reusing existing DID stack:"
+  echo "    DID_REGISTRY=$DID_REGISTRY"
+  echo "    DID_REGISTRAR=$DID_REGISTRAR"
+  echo "    INVITE_REGISTRAR=$INVITE_REGISTRAR"
 fi
 
 echo "============================================"
