@@ -97,7 +97,10 @@ async function getOrCreateWallet(): Promise<ethers.Wallet> {
     throw new Error("No private key. Set PROVIDER_PRIVATE_KEY in .env or allow generation.");
   }
 
-  const newWallet = ethers.Wallet.createRandom().connect(provider);
+  // createRandom() returns HDNodeWallet; reconstruct as plain Wallet so the
+  // function's `ethers.Wallet` return type holds.
+  const generated = ethers.Wallet.createRandom();
+  const newWallet = new ethers.Wallet(generated.privateKey, provider);
   log.info("Generated new wallet:", newWallet.address);
   log.info("Fund this address with ETH to register on-chain.");
 
@@ -473,7 +476,8 @@ async function main() {
       description: "Image annotation (object detection / segmentation / classification) over HTTP POST.",
       mimeType: "application/json",
       declaration: {
-        method: "POST",
+        // method ("POST") is inferred from the route key in createX402Middleware;
+        // newer @x402/extensions disallows it on DeclareDiscoveryExtensionInput.
         bodyType: "json",
         input: { images: ["https://example.com/img.jpg"], task: "object-detection", labels: ["car"], clientAddress: "0x..." },
         inputSchema: {
@@ -988,9 +992,12 @@ async function main() {
     name: "Codatta Annotation Agent",
     description: "Image annotation service by Codatta. Supports object detection, semantic segmentation, and classification for autonomous driving datasets.",
     url: `http://localhost:${A2A_PORT}`,
+    protocolVersion: "0.3.0",
     provider: { organization: "Codatta", url: "https://codatta.io" },
     version: "1.0.0",
     capabilities: { streaming: false, pushNotifications: false },
+    defaultInputModes: ["text/plain"],
+    defaultOutputModes: ["text/plain"],
     skills: [
       { id: "consult", name: "Service Consultation", description: "Ask about annotation capabilities, pricing, supported task types, and how to integrate via MCP", tags: [] },
       { id: "invite", name: "DID Registration", description: "Get an invite code to register a Codatta DID with free annotation credits. Provider can register on behalf of clients without ETH", tags: [] },

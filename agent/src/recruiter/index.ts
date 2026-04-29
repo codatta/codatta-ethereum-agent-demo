@@ -46,9 +46,12 @@ const agentCard: AgentCard = {
     "Recruits data service agents into the Codatta ecosystem. " +
     "Offers real task demand, payment, and reputation building.",
   url: `http://localhost:${A2A_PORT}`,
+  protocolVersion: "0.3.0",
   provider: { organization: "Codatta", url: "https://codatta.io" },
   version: "1.0.0",
   capabilities: { streaming: false, pushNotifications: false },
+  defaultInputModes: ["text/plain"],
+  defaultOutputModes: ["text/plain"],
   skills: [
     { id: "recruit-provider", name: "Recruit Provider", description: "Evaluate and onboard external data service agents into Codatta", tags: [] },
     { id: "capability-assessment", name: "Capability Assessment", description: "Assess agent capabilities via test annotation tasks", tags: [] },

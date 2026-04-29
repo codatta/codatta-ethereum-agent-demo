@@ -39,6 +39,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { provider, getWallet, addresses, hexToDidUri } from "../shared/config.js";
 import { IdentityRegistryABI, InviteRegistrarABI } from "../shared/abis.js";
 import * as log from "../shared/logger.js";
+import { parseTextContent } from "../shared/mcp-content.js";
 
 log.setRole("client-async");
 
@@ -257,15 +258,6 @@ async function maybeRegisterDid(inviteRegistrar: ethers.Contract, invite: Invite
   const clientDid = hexToDidUri(event.args.identifier.toString(16));
   log.success(`Registered DID: ${clientDid}`);
   return clientDid;
-}
-
-// ── MCP parse helper ────────────────────────────────────────────
-
-function parseTextContent(content: unknown): any {
-  if (!Array.isArray(content)) return null;
-  const text = content.find((c: any) => c.type === "text") as { text?: string } | undefined;
-  if (!text?.text) return null;
-  try { return JSON.parse(text.text); } catch { return text.text; }
 }
 
 // ── Watch loop (poll until terminal, pacing by retryAfterSeconds) ─
