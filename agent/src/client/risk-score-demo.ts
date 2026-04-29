@@ -1,7 +1,7 @@
 /**
  * Risk-score client demo.
  *
- * Sibling of `start:client` (sync annotate) and `start:client-async`. Finds a
+ * Sibling of `start:client-annotation` (sync annotate) and `start:client-async-harness`. Finds a
  * provider that advertises `risk-score` in its ERC-8004 registrationFile's
  * `syncServices`, connects over MCP, and exercises `risk_score` on a handful
  * of demo addresses covering the three score buckets (blacklist / proximity /

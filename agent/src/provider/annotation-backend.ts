@@ -1,8 +1,9 @@
 /**
- * Mock Annotation Service API
+ * Mock Annotation Backend
  *
- * Simulates an external annotation backend (e.g. Codatta Data Production System).
- * In production, replace the base URL to point to the real service.
+ * Simulates an external annotation backend (e.g. Codatta Data Production System)
+ * that the provider's `annotate` MCP / HTTP service forwards work to. In
+ * production, replace this with the real backend URL.
  *
  * API:
  *   POST /tasks          — Submit annotation task, returns taskId

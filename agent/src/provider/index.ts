@@ -20,11 +20,11 @@ import {
 } from "@a2a-js/sdk/server/express";
 import type { AgentCard } from "@a2a-js/sdk";
 import { z } from "zod";
-import { startAnnotationService } from "./annotation-service.js";
+import { startAnnotationService } from "./annotation-backend.js";
 import {
   AsyncServiceRegistry, submitTask, getTask, listTasks, startAsyncWorker, recommendRetryAfterSeconds,
   type AsyncServiceDescriptor, type SyncServiceDescriptor,
-} from "./async-service.js";
+} from "./async-framework.js";
 import { scoreAddress } from "./risk-score.js";
 import {
   provider, getWallet, addresses, PROVIDER_PORT, INVITE_SERVICE_URL, hexToDidUri,
@@ -739,7 +739,7 @@ async function main() {
     // Note: claim_invite removed — DID registration with invite now happens on-chain
     // via InviteRegistrar.registerWithInvite(). No MCP tool needed.
 
-    // ── Async service base (generic, business-agnostic) ─────────
+    // ── Async framework (generic, business-agnostic) ────────────
     //
     // Three tools back any async service this provider advertises in its
     // profile's `asyncServices`. They are plumbing only — the real semantics
@@ -1276,7 +1276,7 @@ async function main() {
   // ASYNC_AUTO_PROCESS=true to let registered handlers drain the queue.
   const asyncDescriptors = asyncRegistry.descriptors();
   if (asyncDescriptors.length > 0) {
-    log.step("Async service base");
+    log.step("Async framework");
     for (const d of asyncDescriptors) {
       const hasHandler = asyncRegistry.hasHandler(d.name);
       log.info(`  ${d.name}${d.avgTurnaround ? ` (~${d.avgTurnaround})` : ""}${hasHandler ? " [handler registered]" : " [manual only]"}`);

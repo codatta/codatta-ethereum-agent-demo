@@ -6,9 +6,9 @@
   "scripts": {
     "start:provider": "tsx src/provider/index.ts",
     "set-agent-id": "tsx src/provider/set-agent-id.ts",
-    "start:client": "tsx src/client/index.ts",
-    "start:client-async": "tsx src/client/async-demo.ts",
-    "start:client-risk": "tsx src/client/risk-demo.ts",
+    "start:client-annotation": "tsx src/client/annotation-demo.ts",
+    "start:client-async-harness": "tsx src/client/async-framework-harness.ts",
+    "start:client-risk-score": "tsx src/client/risk-score-demo.ts",
     "query": "tsx src/query/index.ts",
     "start:invite-service": "tsx src/invite-service/index.ts",
     "start:recruiter": "tsx src/recruiter/index.ts",

@@ -102,7 +102,7 @@ Step 3: 双向关联 DID ↔ ERC-8004
 
 ### Client Agent 发现流程
 
-**文件**：`agent/src/client/index.ts`
+**文件**：`agent/src/client/annotation-demo.ts`
 
 ```
 Step 1: 获取 agentId（Demo 中通过 agent-info.json 模拟市场发现）

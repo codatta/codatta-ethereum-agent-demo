@@ -266,7 +266,7 @@ cp .env.example .env
 # the Faucet on the web dashboard (bottom of the page).
 
 # Run the client
-npm run start:client`}</Code>
+npm run start:client-annotation`}</Code>
         </GuideSection>
 
       </div>
