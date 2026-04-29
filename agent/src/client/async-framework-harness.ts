@@ -22,13 +22,13 @@
  *        state, pacing by the provider's `retryAfterSeconds` hint.
  *
  *   Usage
- *     npm run start:client-async                     # full pre-flight + submit + keep polling
- *     npm run start:client-async -- submit "msg"
- *     npm run start:client-async -- poll <taskId?>   # one-shot status
- *     npm run start:client-async -- watch <taskId?>  # re-attach to existing taskId, poll to terminal
- *     npm run start:client-async -- list
+ *     npm run start:client-async-harness                     # full pre-flight + submit + keep polling
+ *     npm run start:client-async-harness -- submit "msg"
+ *     npm run start:client-async-harness -- poll <taskId?>   # one-shot status
+ *     npm run start:client-async-harness -- watch <taskId?>  # re-attach to existing taskId, poll to terminal
+ *     npm run start:client-async-harness -- list
  *
- * The existing synchronous client (./index.ts) is untouched.
+ * The existing synchronous client (./annotation-demo.ts) is untouched.
  */
 import { ethers } from "ethers";
 import fs from "fs";
@@ -390,7 +390,7 @@ async function pollCmd(taskIdArg?: string) {
   const taskId = taskIdArg || state.lastTaskId;
   const mcpEndpoint = state.providerMcp;
   if (!taskId || !mcpEndpoint) {
-    throw new Error("No prior submission. Run `npm run start:client-async` first, or pass a taskId.");
+    throw new Error("No prior submission. Run `npm run start:client-async-harness` first, or pass a taskId.");
   }
 
   log.header("Polling async task");
@@ -422,7 +422,7 @@ async function watchCmd(taskIdArg?: string) {
   const taskId = taskIdArg || state.lastTaskId;
   const mcpEndpoint = state.providerMcp;
   if (!taskId || !mcpEndpoint) {
-    throw new Error("No prior submission. Run `npm run start:client-async` first, or pass a taskId.");
+    throw new Error("No prior submission. Run `npm run start:client-async-harness` first, or pass a taskId.");
   }
 
   log.header("Watching async task");
@@ -441,7 +441,7 @@ async function watchCmd(taskIdArg?: string) {
 async function listCmd() {
   const state = loadState();
   const mcpEndpoint = state.providerMcp;
-  if (!mcpEndpoint) throw new Error("No prior submission. Run `npm run start:client-async` first.");
+  if (!mcpEndpoint) throw new Error("No prior submission. Run `npm run start:client-async-harness` first.");
 
   const wallet = getWallet("CLIENT_PRIVATE_KEY");
   log.header("Listing my submitted tasks");

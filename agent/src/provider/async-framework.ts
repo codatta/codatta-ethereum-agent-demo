@@ -1,7 +1,9 @@
 /**
- * Async Service base — generic framework layer.
+ * Async service framework — task-bus + worker plumbing shared by all async businesses.
  *
- * Sibling of the sync MCP service (see `annotate` in provider/index.ts).
+ * This is NOT a business service itself. It's the generic substrate the
+ * provider plugs business handlers into. The sync counterpart is the direct
+ * MCP tool path (see `annotate` / `risk_score` in provider/index.ts).
  * Any async business (annotation-review, data-validation, CDA reporting, ...)
  * plugs in as a `serviceName` + optional handler. Task state lives in the
  * invite-service (the central task bus) so a provider restart does not lose

@@ -102,7 +102,7 @@ npm run start:provider
 ### 5. 启动 Client（终端 2）
 
 ```bash
-npm run start:client
+npm run start:client-annotation
 ```
 
 Client 自动完成：发现 Agent → 请求标注 → 接收结果 → 提交评价。
