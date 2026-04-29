@@ -2,11 +2,26 @@
  * Focused end-to-end test for the SDK-based x402 integration.
  * Runs server + client in one process. No DID / ERC-8004 / invite service.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { ethers } from "ethers";
 import express from "express";
 import { createX402Middleware, wrapFetchWithX402, type X402Config } from "./src/shared/x402.js";
 
-const TOKEN = (process.env.TOKEN || "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318") as `0x${string}`;
+// Default to the MockUSDC address from the latest deploy. Anvil resets and
+// re-deploys give it a different address each time, so a hardcoded literal
+// would silently point at a dead contract. Override via TOKEN= for ad-hoc
+// runs against a different ERC-3009 token.
+function defaultTokenFromDeployment(): `0x${string}` {
+  const deploymentPath = path.resolve(import.meta.dirname, "../script/deployment.json");
+  const deployment = JSON.parse(readFileSync(deploymentPath, "utf-8")) as { mockUSDC?: string };
+  if (!deployment.mockUSDC) {
+    throw new Error(`mockUSDC not found in ${deploymentPath} — run forge deploy first`);
+  }
+  return deployment.mockUSDC as `0x${string}`;
+}
+
+const TOKEN = (process.env.TOKEN ?? defaultTokenFromDeployment()) as `0x${string}`;
 const RPC = "http://127.0.0.1:8545";
 const PORT = 4099;
 
