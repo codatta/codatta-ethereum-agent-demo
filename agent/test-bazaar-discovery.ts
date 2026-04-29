@@ -22,9 +22,10 @@ import {
   getBazaarCatalog,
   type X402Config,
 } from "./src/shared/x402.js";
+import { defaultMockUSDC } from "./src/shared/deployment.js";
 
 const PORT = 4097;
-const TOKEN = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318" as `0x${string}`;
+const TOKEN = (process.env.TOKEN ?? defaultMockUSDC()) as `0x${string}`;
 const PROVIDER_ADDR = "0x90F79bf6EB2c4f870365E785982E1f101E93b906";
 
 async function main() {

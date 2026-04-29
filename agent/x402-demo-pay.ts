@@ -4,8 +4,9 @@
  */
 import { ethers } from "ethers";
 import { wrapFetchWithX402, type X402Config } from "./src/shared/x402.js";
+import { defaultMockUSDC } from "./src/shared/deployment.js";
 
-const TOKEN = (process.env.TOKEN || "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318") as `0x${string}`;
+const TOKEN = (process.env.TOKEN ?? defaultMockUSDC()) as `0x${string}`;
 const RPC = "http://127.0.0.1:8545";
 const URL = "http://127.0.0.1:4099/annotate";
 
