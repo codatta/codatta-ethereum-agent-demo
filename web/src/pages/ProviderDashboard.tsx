@@ -591,11 +591,11 @@ export function ProviderDashboard() {
 
           <StepCard num={2} title="Implement MCP Service">
             <p>Expose your capabilities as MCP tools. Clients discover your tools via <code>tools/list</code> and invoke them via <code>tools/call</code>.</p>
-            <p><strong>Sync base (one-call-returns-result):</strong></p>
+            <p><strong>Sync tools (one-call-returns-result):</strong></p>
             <ul style={{ margin: '4px 0 8px', paddingLeft: 20 }}>
               <li><code>annotate</code> — labels images, blocks until complete, returns annotations</li>
             </ul>
-            <p><strong>Async base (submit + poll, persistent queue):</strong></p>
+            <p><strong>Async tools (submit + poll, persistent queue):</strong></p>
             <ul style={{ margin: '4px 0', paddingLeft: 20 }}>
               <li><code>submit_task(serviceName, payload)</code> — queue a task, returns taskId + retryAfterSeconds</li>
               <li><code>get_task(taskId)</code> — check status and fetch result when ready</li>
