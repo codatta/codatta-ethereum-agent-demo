@@ -27,6 +27,11 @@ VALIDATION_REGISTRY=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT
 # On Base Sepolia / mainnet the agent uses the real USDC address from .env,
 # so we leave USDC_ADDRESS untouched when the field is missing.
 MOCK_USDC=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT')).get('mockUSDC',''))")
+# deploymentBlock is the block at which this Deploy run completed. Runtime
+# services use it as the lower bound for any historical event scan so they
+# don't hit RPC getLogs range limits. Older deployment.json files lack the
+# field — keep .env value untouched in that case.
+DEPLOYMENT_BLOCK=$(python3 -c "import json; print(json.load(open('$DEPLOYMENT')).get('deploymentBlock',''))")
 
 # Update .env (replace existing values or append)
 update_env() {
@@ -63,4 +68,11 @@ if [ -n "$MOCK_USDC" ]; then
   echo "  USDC_ADDRESS=$MOCK_USDC (from mockUSDC)"
 else
   echo "  USDC_ADDRESS: preserved (no mockUSDC in deployment.json — assuming real network)"
+fi
+
+if [ -n "$DEPLOYMENT_BLOCK" ]; then
+  update_env "DEPLOYMENT_BLOCK" "$DEPLOYMENT_BLOCK"
+  echo "  DEPLOYMENT_BLOCK=$DEPLOYMENT_BLOCK"
+else
+  echo "  DEPLOYMENT_BLOCK: preserved (no deploymentBlock in deployment.json — re-run forge after pulling latest Deploy.s.sol)"
 fi

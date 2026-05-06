@@ -13,8 +13,7 @@ import { ethers } from "ethers";
 import express from "express";
 import fs from "fs";
 import path from "path";
-import { provider, getWallet, addresses, hexToDidUri } from "../shared/config.js";
-import { defaultDeploymentBlock } from "../shared/deployment.js";
+import { provider, getWallet, addresses, hexToDidUri, DEPLOYMENT_BLOCK } from "../shared/config.js";
 import * as log from "../shared/logger.js";
 
 log.setRole("invite-svc");
@@ -189,15 +188,23 @@ async function reconcileNonceFromChain(inviteRegistrar: ethers.Contract) {
   // deploymentBlock is the lower bound for fresh deployments; lastScannedBlock
   // skips already-processed ranges across restarts.
   const latest = await provider.getBlockNumber();
-  const floor = Math.max(defaultDeploymentBlock(), store.lastScannedBlock);
+  const floor = Math.max(DEPLOYMENT_BLOCK, store.lastScannedBlock);
 
   if (floor > latest) {
     log.info(`Nonce reconciliation skipped (lastScanned=${floor} ≥ latest=${latest})`);
     return;
   }
 
+  const totalBlocks = latest - floor + 1;
+  const totalChunks = Math.ceil(totalBlocks / SCAN_CHUNK_BLOCKS);
+  log.info(`Scanning InviteRegistered: blocks ${floor}..${latest} (${totalBlocks} blocks, ~${totalChunks} chunks)`);
+  if (floor === 0) {
+    log.info("  Note: DEPLOYMENT_BLOCK is unset — scanning from genesis. Run sync-env.sh after deploy, or set DEPLOYMENT_BLOCK in agent/.env directly.");
+  }
+
   let maxNonce = 0;
   let from = floor;
+  let chunkIdx = 0;
   while (from <= latest) {
     const to = Math.min(from + SCAN_CHUNK_BLOCKS - 1, latest);
     try {
@@ -213,6 +220,12 @@ async function reconcileNonceFromChain(inviteRegistrar: ethers.Contract) {
       }
       store.lastScannedBlock = to;
       saveStore();
+      chunkIdx++;
+      // Log every 20 chunks to keep output light but visible. Always log the
+      // last one so the user knows reconciliation finished.
+      if (chunkIdx % 20 === 0 || to === latest) {
+        log.info(`  Scan progress: ${chunkIdx}/${totalChunks} chunks (block ${to})`);
+      }
     } catch (e: any) {
       log.info(`Scan ${from}-${to} failed (non-fatal, continuing live): ${e.message}`);
       // Bail out of backfill; the live listener below still catches new events.
