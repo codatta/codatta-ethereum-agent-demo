@@ -173,25 +173,85 @@ async function generateInviteCode(inviter: string, clientAddress: string): Promi
 }
 
 // ── Event listener ──────────────────────────────────────────────
+//
+// We deliberately avoid ethers `.on()` here. Over HTTP RPCs, ethers installs
+// a server-side filter (`eth_newFilter`) and polls `eth_getFilterChanges`,
+// but public providers (sepolia.base.org, Alchemy, Infura) expire filters
+// within minutes — the next poll then throws "filter not found". Instead we
+// run our own poll loop calling `queryFilter(from, to)`, which is stateless
+// on the server side and works on any HTTP RPC.
 
-// Block range per getLogs request. Public RPCs (Alchemy/Infura/Base public)
-// reject ranges wider than ~10k blocks; 9_000 leaves headroom.
+// Block range per getLogs request. Public RPCs reject ranges wider than ~10k
+// blocks; 9_000 leaves headroom.
 const SCAN_CHUNK_BLOCKS = 9_000;
 
+// How often to poll for new InviteRegistered events. Public RPCs are
+// rate-limited so going much faster than 5s is wasteful.
+const POLL_INTERVAL_MS = 5_000;
+
+function processInviteEvent(evt: ethers.EventLog | ethers.Log) {
+  const args = (evt as ethers.EventLog).args;
+  if (!args) return;
+  const identifier = args.identifier as bigint;
+  const nonce = Number((args.nonce ?? args[3]) as bigint);
+  const n = nonce.toString();
+  const record = store.invites[n];
+
+  if (record && !record.claimed) {
+    record.clientDid = hexToDidUri(identifier.toString(16));
+    record.claimed = true;
+    record.claimedAt = new Date().toISOString();
+    log.event("InviteRegistered", `nonce=${n}, DID=${record.clientDid}`);
+  } else if (!record) {
+    // The chain has nonces this service doesn't know about — either
+    // invite-service-data.json was wiped, or another invite-service issued
+    // them. We still bump nonceCounter past them so we don't collide.
+    log.info(`InviteRegistered for unknown nonce=${n}`);
+  }
+
+  if (nonce >= store.nonceCounter) {
+    store.nonceCounter = nonce + 1;
+  }
+}
+
+async function scanInviteEvents(
+  inviteRegistrar: ethers.Contract,
+  fromBlock: number,
+  toBlock: number,
+  progressLabel?: string,
+) {
+  const totalBlocks = toBlock - fromBlock + 1;
+  const totalChunks = Math.ceil(totalBlocks / SCAN_CHUNK_BLOCKS);
+  let from = fromBlock;
+  let chunkIdx = 0;
+  while (from <= toBlock) {
+    const to = Math.min(from + SCAN_CHUNK_BLOCKS - 1, toBlock);
+    const past = await inviteRegistrar.queryFilter(
+      inviteRegistrar.filters.InviteRegistered(),
+      from,
+      to,
+    );
+    for (const evt of past) processInviteEvent(evt);
+    store.lastScannedBlock = to;
+    saveStore();
+    chunkIdx++;
+    if (progressLabel && (chunkIdx % 20 === 0 || to === toBlock)) {
+      log.info(`  ${progressLabel}: ${chunkIdx}/${totalChunks} chunks (block ${to})`);
+    }
+    from = to + 1;
+  }
+}
+
 async function reconcileNonceFromChain(inviteRegistrar: ethers.Contract) {
-  // Reconcile nonceCounter with on-chain usage. Without this, wiping
-  // invite-service-data.json while the chain retains used nonces causes the
-  // service to re-issue nonce=1 and the contract rejects with "Invite already
-  // used".
-  //
-  // Scan in chunks from MAX(deploymentBlock, lastScannedBlock) up to latest.
-  // deploymentBlock is the lower bound for fresh deployments; lastScannedBlock
-  // skips already-processed ranges across restarts.
+  // Bring lastScannedBlock and nonceCounter up to current chain head.
+  // Floor is MAX(DEPLOYMENT_BLOCK, lastScannedBlock): deploymentBlock is the
+  // hard lower bound for fresh deployments; lastScannedBlock skips already-
+  // processed ranges across restarts.
   const latest = await provider.getBlockNumber();
   const floor = Math.max(DEPLOYMENT_BLOCK, store.lastScannedBlock);
 
   if (floor > latest) {
-    log.info(`Nonce reconciliation skipped (lastScanned=${floor} ≥ latest=${latest})`);
+    log.info(`Initial scan skipped (lastScanned=${floor} ≥ latest=${latest})`);
     return;
   }
 
@@ -202,42 +262,23 @@ async function reconcileNonceFromChain(inviteRegistrar: ethers.Contract) {
     log.info("  Note: DEPLOYMENT_BLOCK is unset — scanning from genesis. Run sync-env.sh after deploy, or set DEPLOYMENT_BLOCK in agent/.env directly.");
   }
 
-  let maxNonce = 0;
-  let from = floor;
-  let chunkIdx = 0;
-  while (from <= latest) {
-    const to = Math.min(from + SCAN_CHUNK_BLOCKS - 1, latest);
-    try {
-      const past = await inviteRegistrar.queryFilter(
-        inviteRegistrar.filters.InviteRegistered(),
-        from,
-        to,
-      );
-      for (const evt of past) {
-        const args = (evt as ethers.EventLog).args;
-        const nonce = Number((args?.nonce ?? args?.[3]) as bigint);
-        if (nonce > maxNonce) maxNonce = nonce;
-      }
-      store.lastScannedBlock = to;
-      saveStore();
-      chunkIdx++;
-      // Log every 20 chunks to keep output light but visible. Always log the
-      // last one so the user knows reconciliation finished.
-      if (chunkIdx % 20 === 0 || to === latest) {
-        log.info(`  Scan progress: ${chunkIdx}/${totalChunks} chunks (block ${to})`);
-      }
-    } catch (e: any) {
-      log.info(`Scan ${from}-${to} failed (non-fatal, continuing live): ${e.message}`);
-      // Bail out of backfill; the live listener below still catches new events.
-      break;
-    }
-    from = to + 1;
-  }
+  await scanInviteEvents(inviteRegistrar, floor, latest, "Scan progress");
+}
 
-  if (store.nonceCounter <= maxNonce) {
-    log.info(`Bumping nonceCounter ${store.nonceCounter} → ${maxNonce + 1} (on-chain used max=${maxNonce})`);
-    store.nonceCounter = maxNonce + 1;
-    saveStore();
+async function pollLoop(inviteRegistrar: ethers.Contract): Promise<never> {
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    try {
+      const latest = await provider.getBlockNumber();
+      const from = store.lastScannedBlock + 1;
+      if (from > latest) continue;
+      // No progress label: live polling normally covers a handful of blocks
+      // and shouldn't spam the log on each cycle.
+      await scanInviteEvents(inviteRegistrar, from, latest);
+    } catch (e: any) {
+      log.info(`Event poll failed (will retry in ${POLL_INTERVAL_MS}ms): ${e.message}`);
+    }
   }
 }
 
@@ -249,25 +290,12 @@ async function startEventListener() {
   try {
     await reconcileNonceFromChain(inviteRegistrar);
   } catch (e: any) {
-    log.info(`Nonce reconciliation failed (non-fatal): ${e.message}`);
+    log.info(`Initial reconcile failed (non-fatal): ${e.message}`);
   }
 
-  inviteRegistrar.on("InviteRegistered", (identifier: bigint, owner: string, inviter: string, nonce: bigint) => {
-    const n = nonce.toString();
-    const record = store.invites[n];
-
-    if (record) {
-      record.clientDid = hexToDidUri(identifier.toString(16));
-      record.claimed = true;
-      record.claimedAt = new Date().toISOString();
-      saveStore();
-      log.event("InviteRegistered", `nonce=${n}, DID=${record.clientDid}`);
-    } else {
-      log.info(`InviteRegistered for unknown nonce=${n}`);
-    }
-  });
-
-  log.info("Listening for InviteRegistered events...");
+  // Fire-and-forget — pollLoop runs forever, errors are caught inside.
+  void pollLoop(inviteRegistrar);
+  log.info(`Polling InviteRegistered every ${POLL_INTERVAL_MS}ms`);
 }
 
 // ── HTTP API ────────────────────────────────────────────────────
