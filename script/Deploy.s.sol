@@ -83,20 +83,21 @@ contract Deploy is Script {
 
         vm.stopBroadcast();
 
-        // Write deployment addresses
+        // Write deployment addresses. `deploymentBlock` is the floor for any
+        // off-chain consumer that needs to backfill events (e.g. invite-service
+        // reconciling InviteRegistered nonces) — without it, RPC providers
+        // reject getLogs(0, latest) on real networks for being too wide.
         string memory obj = "d";
         vm.serializeAddress(obj, "didRegistry", didRegistryAddr);
         vm.serializeAddress(obj, "didRegistrar", didRegistrarAddr);
         vm.serializeAddress(obj, "inviteRegistrar", inviteRegistrarAddr);
         vm.serializeAddress(obj, "identityRegistry", address(identity));
         vm.serializeAddress(obj, "reputationRegistry", address(reputation));
-        string memory result;
-        if (skipMockUsdc) {
-            result = vm.serializeAddress(obj, "validationRegistry", address(validation));
-        } else {
-            vm.serializeAddress(obj, "validationRegistry", address(validation));
-            result = vm.serializeAddress(obj, "mockUSDC", mockUSDC);
+        vm.serializeAddress(obj, "validationRegistry", address(validation));
+        if (!skipMockUsdc) {
+            vm.serializeAddress(obj, "mockUSDC", mockUSDC);
         }
+        string memory result = vm.serializeUint(obj, "deploymentBlock", block.number);
         vm.writeJson(result, "./script/deployment.json");
     }
 }

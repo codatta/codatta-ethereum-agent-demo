@@ -15,6 +15,7 @@ interface Deployment {
   reputationRegistry?: string;
   validationRegistry?: string;
   inviteRegistrar?: string;
+  deploymentBlock?: number;
 }
 
 let cached: Deployment | null = null;
@@ -31,4 +32,14 @@ export function defaultMockUSDC(): `0x${string}` {
   const addr = loadDeployment().mockUSDC;
   if (!addr) throw new Error("mockUSDC not found in script/deployment.json — run forge deploy first");
   return addr as `0x${string}`;
+}
+
+/**
+ * Block at which the current deployment was made — used as the lower bound
+ * for any historical event scan to keep getLogs ranges within RPC limits.
+ * Returns 0 when the deployment predates this field (legacy local anvil
+ * runs), letting callers fall back to from-genesis scans where it is cheap.
+ */
+export function defaultDeploymentBlock(): number {
+  return loadDeployment().deploymentBlock ?? 0;
 }

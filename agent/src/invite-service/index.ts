@@ -14,6 +14,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { provider, getWallet, addresses, hexToDidUri } from "../shared/config.js";
+import { defaultDeploymentBlock } from "../shared/deployment.js";
 import * as log from "../shared/logger.js";
 
 log.setRole("invite-svc");
@@ -97,6 +98,10 @@ interface StoreData {
   profiles: Record<string, any>;
   // Generic async task queue — base for any async service (annotation-review, validation, etc.)
   asyncTasks: Record<string, AsyncTask>;
+  // Highest block already scanned for InviteRegistered events. Persisted so
+  // restarts only scan the delta — without this we'd repeat 0..latest each
+  // boot and exceed RPC getLogs limits on real chains.
+  lastScannedBlock: number;
 }
 
 let store: StoreData = {
@@ -107,6 +112,7 @@ let store: StoreData = {
   serviceHistory: [],
   profiles: {},
   asyncTasks: {},
+  lastScannedBlock: 0,
 };
 
 function loadStore() {
@@ -169,32 +175,66 @@ async function generateInviteCode(inviter: string, clientAddress: string): Promi
 
 // ── Event listener ──────────────────────────────────────────────
 
+// Block range per getLogs request. Public RPCs (Alchemy/Infura/Base public)
+// reject ranges wider than ~10k blocks; 9_000 leaves headroom.
+const SCAN_CHUNK_BLOCKS = 9_000;
+
+async function reconcileNonceFromChain(inviteRegistrar: ethers.Contract) {
+  // Reconcile nonceCounter with on-chain usage. Without this, wiping
+  // invite-service-data.json while the chain retains used nonces causes the
+  // service to re-issue nonce=1 and the contract rejects with "Invite already
+  // used".
+  //
+  // Scan in chunks from MAX(deploymentBlock, lastScannedBlock) up to latest.
+  // deploymentBlock is the lower bound for fresh deployments; lastScannedBlock
+  // skips already-processed ranges across restarts.
+  const latest = await provider.getBlockNumber();
+  const floor = Math.max(defaultDeploymentBlock(), store.lastScannedBlock);
+
+  if (floor > latest) {
+    log.info(`Nonce reconciliation skipped (lastScanned=${floor} ≥ latest=${latest})`);
+    return;
+  }
+
+  let maxNonce = 0;
+  let from = floor;
+  while (from <= latest) {
+    const to = Math.min(from + SCAN_CHUNK_BLOCKS - 1, latest);
+    try {
+      const past = await inviteRegistrar.queryFilter(
+        inviteRegistrar.filters.InviteRegistered(),
+        from,
+        to,
+      );
+      for (const evt of past) {
+        const args = (evt as ethers.EventLog).args;
+        const nonce = Number((args?.nonce ?? args?.[3]) as bigint);
+        if (nonce > maxNonce) maxNonce = nonce;
+      }
+      store.lastScannedBlock = to;
+      saveStore();
+    } catch (e: any) {
+      log.info(`Scan ${from}-${to} failed (non-fatal, continuing live): ${e.message}`);
+      // Bail out of backfill; the live listener below still catches new events.
+      break;
+    }
+    from = to + 1;
+  }
+
+  if (store.nonceCounter <= maxNonce) {
+    log.info(`Bumping nonceCounter ${store.nonceCounter} → ${maxNonce + 1} (on-chain used max=${maxNonce})`);
+    store.nonceCounter = maxNonce + 1;
+    saveStore();
+  }
+}
+
 async function startEventListener() {
   const inviteRegistrar = new ethers.Contract(
     addresses.inviteRegistrar, InviteRegistrarABI, provider
   );
 
-  // On startup, reconcile nonceCounter with on-chain usage. Without this,
-  // wiping invite-service-data.json while the chain retains used nonces causes
-  // the service to re-issue nonce=1 and the contract rejects with
-  // "Invite already used".
   try {
-    const past = await inviteRegistrar.queryFilter(
-      inviteRegistrar.filters.InviteRegistered(),
-      0,
-      "latest",
-    );
-    let maxNonce = 0;
-    for (const evt of past) {
-      const args = (evt as ethers.EventLog).args;
-      const nonce = Number((args?.nonce ?? args?.[3]) as bigint);
-      if (nonce > maxNonce) maxNonce = nonce;
-    }
-    if (store.nonceCounter <= maxNonce) {
-      log.info(`Bumping nonceCounter ${store.nonceCounter} → ${maxNonce + 1} (on-chain used max=${maxNonce})`);
-      store.nonceCounter = maxNonce + 1;
-      saveStore();
-    }
+    await reconcileNonceFromChain(inviteRegistrar);
   } catch (e: any) {
     log.info(`Nonce reconciliation failed (non-fatal): ${e.message}`);
   }
