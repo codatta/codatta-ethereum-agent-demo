@@ -7,7 +7,9 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import {
   provider, getWallet, addresses, hexToDidUri,
   X402_ENABLED, USDC_PRICE_PER_IMAGE, USDC_ADDRESS, USDC_NAME, USDC_VERSION, USDC_DECIMALS, RPC_URL,
+  DEPLOYMENT_BLOCK,
 } from "../shared/config.js";
+import { queryFilterChunked } from "../shared/events.js";
 
 /**
  * Fetch ERC-8004 registrationFile from a tokenURI.
@@ -69,8 +71,10 @@ async function discoverProviderId(excludeOwner: string): Promise<bigint> {
   // registrationFile advertises an MCP service endpoint. Providers that haven't
   // registered on ERC-8004 are not discoverable through this path — by design.
   log.info("Querying ERC-8004 IdentityRegistry for providers...");
-  const registeredEvents = await identity.queryFilter(
-    identity.filters.Registered()
+  const registeredEvents = await queryFilterChunked(
+    identity,
+    identity.filters.Registered(),
+    DEPLOYMENT_BLOCK,
   );
 
   let totalScanned = 0;

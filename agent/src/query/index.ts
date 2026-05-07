@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
-import { provider, addresses, hexToDidUri } from "../shared/config.js";
+import { provider, addresses, hexToDidUri, DEPLOYMENT_BLOCK } from "../shared/config.js";
+import { queryFilterChunked } from "../shared/events.js";
 import {
   DIDRegistryABI, IdentityRegistryABI,
   ReputationRegistryABI, ValidationRegistryABI,
@@ -126,7 +127,7 @@ async function queryReputation(agentId: bigint) {
 
   // Query recent feedback events
   const filter = reputation.filters.NewFeedback(agentId);
-  const events = await reputation.queryFilter(filter);
+  const events = await queryFilterChunked(reputation, filter, DEPLOYMENT_BLOCK);
   log.info(`Feedback count: ${events.length}`);
 
   for (const event of events) {
@@ -145,7 +146,7 @@ async function queryValidation(agentId: bigint) {
 
   // Query validation request events
   const reqFilter = validation.filters.ValidationRequest(null, agentId);
-  const reqEvents = await validation.queryFilter(reqFilter);
+  const reqEvents = await queryFilterChunked(validation, reqFilter, DEPLOYMENT_BLOCK);
   log.info("Agent ID:", agentId.toString());
   log.info(`Validation records: ${reqEvents.length}`);
 
