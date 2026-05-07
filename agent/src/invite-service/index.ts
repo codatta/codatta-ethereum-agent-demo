@@ -13,6 +13,7 @@ import { ethers } from "ethers";
 import express from "express";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { provider, getWallet, addresses, hexToDidUri, DEPLOYMENT_BLOCK } from "../shared/config.js";
 import * as log from "../shared/logger.js";
 
@@ -29,7 +30,9 @@ const InviteRegistrarABI = [
 // ── Persistent data store ───────────────────────────────────────
 
 interface InviteRecord {
-  nonce: number;
+  // uint256 doesn't fit JS Number; carry as decimal string everywhere except
+  // when handing to ethers (BigNumberish accepts strings) or signing.
+  nonce: string;
   inviter: string;
   clientAddress: string;
   signature: string;
@@ -88,7 +91,9 @@ interface AsyncTask {
 }
 
 interface StoreData {
-  nonceCounter: number;
+  // Random uint256 nonces (decimal string) — invite-service no longer holds
+  // a sequential counter; collisions are checked against the contract's
+  // public `usedNonces` mapping at issuance time.
   invites: Record<string, InviteRecord>;
   hiddenAgents: string[];
   agentRegistrations: Record<string, AgentRegistration>;
@@ -104,7 +109,6 @@ interface StoreData {
 }
 
 let store: StoreData = {
-  nonceCounter: 1,
   invites: {},
   hiddenAgents: [],
   agentRegistrations: {},
@@ -133,8 +137,30 @@ function saveStore() {
 
 // ── Invite code generation ──────────────────────────────────────
 
+// Read-only contract handle for nonce-availability checks. Provider has no
+// signer attached because we only call view methods.
+const inviteRegistrarReadOnly = new ethers.Contract(
+  addresses.inviteRegistrar,
+  ["function usedNonces(uint256) view returns (bool)"],
+  provider,
+);
+
+async function pickRandomNonce(): Promise<bigint> {
+  // 256 bits of entropy — collision probability against the entire used-nonce
+  // set is astronomically small. The chain check below is belt-and-suspenders.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const nonce = BigInt("0x" + crypto.randomBytes(32).toString("hex"));
+    if (nonce === 0n) continue;
+    const ns = nonce.toString();
+    if (store.invites[ns]) continue;
+    if (await inviteRegistrarReadOnly.usedNonces(nonce)) continue;
+    return nonce;
+  }
+  throw new Error("Could not pick an unused nonce after 5 attempts (entropy source broken?)");
+}
+
 async function generateInviteCode(inviter: string, clientAddress: string): Promise<{
-  nonce: number;
+  nonce: string;
   signature: string;
 } | null> {
   // Reuse an existing unclaimed invite for this (inviter, client) pair.
@@ -147,7 +173,7 @@ async function generateInviteCode(inviter: string, clientAddress: string): Promi
     }
   }
 
-  const nonce = store.nonceCounter++;
+  const nonce = await pickRandomNonce();
   const chainId = (await provider.getNetwork()).chainId;
 
   const messageHash = ethers.solidityPackedKeccak256(
@@ -156,8 +182,9 @@ async function generateInviteCode(inviter: string, clientAddress: string): Promi
   );
   const signature = await signer.signMessage(ethers.getBytes(messageHash));
 
-  store.invites[nonce.toString()] = {
-    nonce,
+  const ns = nonce.toString();
+  store.invites[ns] = {
+    nonce: ns,
     inviter,
     clientAddress,
     signature,
@@ -168,8 +195,8 @@ async function generateInviteCode(inviter: string, clientAddress: string): Promi
   };
   saveStore();
 
-  log.info(`Invite generated: nonce=${nonce}, inviter=${inviter.slice(0, 10)}..., client=${clientAddress.slice(0, 10)}...`);
-  return { nonce, signature };
+  log.info(`Invite generated: nonce=${ns.slice(0, 12)}..., inviter=${inviter.slice(0, 10)}..., client=${clientAddress.slice(0, 10)}...`);
+  return { nonce: ns, signature };
 }
 
 // ── Event listener ──────────────────────────────────────────────
@@ -193,24 +220,20 @@ function processInviteEvent(evt: ethers.EventLog | ethers.Log) {
   const args = (evt as ethers.EventLog).args;
   if (!args) return;
   const identifier = args.identifier as bigint;
-  const nonce = Number((args.nonce ?? args[3]) as bigint);
-  const n = nonce.toString();
+  // Carry as bigint then stringify — uint256 random nonces don't fit in Number.
+  const n = ((args.nonce ?? args[3]) as bigint).toString();
   const record = store.invites[n];
 
   if (record && !record.claimed) {
     record.clientDid = hexToDidUri(identifier.toString(16));
     record.claimed = true;
     record.claimedAt = new Date().toISOString();
-    log.event("InviteRegistered", `nonce=${n}, DID=${record.clientDid}`);
+    log.event("InviteRegistered", `nonce=${n.slice(0, 12)}..., DID=${record.clientDid}`);
   } else if (!record) {
-    // The chain has nonces this service doesn't know about — either
-    // invite-service-data.json was wiped, or another invite-service issued
-    // them. We still bump nonceCounter past them so we don't collide.
-    log.info(`InviteRegistered for unknown nonce=${n}`);
-  }
-
-  if (nonce >= store.nonceCounter) {
-    store.nonceCounter = nonce + 1;
+    // Foreign nonce — issued by some other invite-service against the same
+    // contract. With random uint256 nonces collision is astronomically
+    // unlikely, so this is just observability.
+    log.info(`InviteRegistered for unknown nonce=${n.slice(0, 12)}...`);
   }
 }
 
@@ -242,8 +265,12 @@ async function scanInviteEvents(
   }
 }
 
-async function reconcileNonceFromChain(inviteRegistrar: ethers.Contract) {
-  // Bring lastScannedBlock and nonceCounter up to current chain head.
+async function backfillClaimsFromChain(inviteRegistrar: ethers.Contract) {
+  // Catch up `invites[].claimed` from chain events that landed while the
+  // service was offline. With random nonces we no longer maintain a counter,
+  // so this scan exists purely to mark already-claimed invites in the local
+  // store — the live pollLoop below handles new claims.
+  //
   // Floor is MAX(DEPLOYMENT_BLOCK, lastScannedBlock): deploymentBlock is the
   // hard lower bound for fresh deployments; lastScannedBlock skips already-
   // processed ranges across restarts.
@@ -288,9 +315,9 @@ async function startEventListener() {
   );
 
   try {
-    await reconcileNonceFromChain(inviteRegistrar);
+    await backfillClaimsFromChain(inviteRegistrar);
   } catch (e: any) {
-    log.info(`Initial reconcile failed (non-fatal): ${e.message}`);
+    log.info(`Initial backfill failed (non-fatal): ${e.message}`);
   }
 
   // Fire-and-forget — pollLoop runs forever, errors are caught inside.
