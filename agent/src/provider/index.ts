@@ -152,7 +152,7 @@ const A2A_PORT = PROVIDER_PORT + 2;
 
 // ── Invite Service integration ──────────────────────────────────
 
-async function requestInviteCode(inviter: string, clientAddress: string): Promise<{ nonce: number; signature: string; inviteRegistrar: string } | null> {
+async function requestInviteCode(inviter: string, clientAddress: string): Promise<{ nonce: string; signature: string; inviteRegistrar: string } | null> {
   try {
     const res = await fetch(`${INVITE_SERVICE_URL}/generate`, {
       method: "POST",
@@ -160,7 +160,8 @@ async function requestInviteCode(inviter: string, clientAddress: string): Promis
       body: JSON.stringify({ inviter, clientAddress }),
     });
     if (!res.ok) return null;
-    return await res.json() as { nonce: number; signature: string; inviteRegistrar: string };
+    // nonce is a uint256 decimal string — random nonces don't fit in JS Number.
+    return await res.json() as { nonce: string; signature: string; inviteRegistrar: string };
   } catch {
     log.info("Invite Service unavailable, skipping invite");
     return null;
@@ -198,18 +199,43 @@ async function executeAnnotation(images: string[], task: string, labels?: string
 }
 
 async function updateValidation(agentId: bigint) {
-  const requestHash = ethers.keccak256(ethers.toUtf8Bytes(`annotation-${Date.now()}`));
+  const requestHash = ethers.keccak256(ethers.toUtf8Bytes(`annotation-${Date.now()}-${Math.random()}`));
   try {
-    await (await validationReg.validationRequest(
+    log.info(`[validation] request: hash=${requestHash.slice(0, 18)}..., agentId=${agentId.toString().slice(0, 12)}...`);
+    const reqTx = await validationReg.validationRequest(
       wallet.address, agentId,
       "ipfs://QmAnnotationResult", requestHash
-    )).wait();
-    await (await validationReg.validationResponse(
+    );
+    log.info(`[validation] request tx: ${reqTx.hash}`);
+    // Public RPCs (sepolia.base.org) load-balance across nodes that aren't
+    // strictly synced. Wait 2 confirmations so the next estimateGas hits a
+    // node that's caught up, then poll the storage slot directly to be sure.
+    const reqReceipt = await reqTx.wait(2);
+    log.info(`[validation] request receipt: status=${reqReceipt?.status}, block=${reqReceipt?.blockNumber}`);
+    if (reqReceipt?.status !== 1) {
+      log.info(`[validation] request reverted on-chain (status=${reqReceipt?.status}), skipping response`);
+      return;
+    }
+    // getValidationStatus reverts with "unknown" until the entry is visible
+    // on whichever node estimateGas hits — poll until it stops reverting.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        await validationReg.getValidationStatus(requestHash);
+        break; // entry visible
+      } catch {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+
+    const respTx = await validationReg.validationResponse(
       requestHash, 90,
       "ipfs://QmValidationReport",
       ethers.keccak256(ethers.toUtf8Bytes("validation-ok")),
       ethers.encodeBytes32String("annotation")
-    )).wait();
+    );
+    log.info(`[validation] response tx: ${respTx.hash}`);
+    const respReceipt = await respTx.wait();
+    log.info(`[validation] response receipt: status=${respReceipt?.status}`);
     log.info("Validation updated on-chain");
   } catch (e: any) {
     log.info("Validation update skipped:", e.message);
