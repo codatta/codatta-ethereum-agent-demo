@@ -1087,6 +1087,55 @@ async function main() {
         const dataPart = ctx.userMessage.parts?.find((p: any) => p.type === "data") as any;
         const clientAddress = dataPart?.data?.clientAddress || "";
 
+        // Returning-user shortcut — if clientAddress already owns a Codatta
+        // DID on-chain, skip invite issuance and tell client to go straight
+        // to annotation. The check is on-chain (DIDRegistry) so it survives
+        // any local invite-service-data wipe / redeploy where the DID stack
+        // is preserved (SKIP_DID mode).
+        if (clientAddress && /^0x[0-9a-fA-F]{40}$/.test(clientAddress)) {
+          try {
+            const owned = (await didRegistry.getOwnedDids(clientAddress)) as bigint[];
+            if (owned && owned.length > 0) {
+              const existingDid = owned[0];
+              const clientDid = hexToDidUri(existingDid.toString(16));
+              log.info(`A2A returning user: ${clientAddress.slice(0, 10)}... already has DID ${clientDid}`);
+              this.conversationState.set(contextKey, "returning");
+              eventBus.publish({
+                kind: "task",
+                id: ctx.taskId,
+                contextId: contextKey,
+                status: { state: "completed", timestamp: new Date().toISOString() },
+                history: [{
+                  role: "agent",
+                  messageId: `resp-${Date.now()}`,
+                  parts: [
+                    {
+                      type: "text",
+                      text: "Welcome back! You're already registered as a Codatta user. " +
+                        "Skipping invite — call the `annotate` MCP tool directly.",
+                    },
+                    {
+                      type: "data",
+                      data: {
+                        action: "returning-user",
+                        clientDid,
+                        mcpEndpoint: mcpEndpointUrl,
+                        // Demo doesn't track quota per DID; expose a placeholder
+                        // so client UX renders consistently.
+                        remainingQuota: 100,
+                      },
+                    },
+                  ],
+                }],
+              } as any);
+              eventBus.finished();
+              return;
+            }
+          } catch (e: any) {
+            log.info(`On-chain DID lookup failed (will issue fresh invite): ${e.message}`);
+          }
+        }
+
         // Request invite code from Invite Service
         const invite = await requestInviteCode(wallet.address, clientAddress);
 
