@@ -547,9 +547,13 @@ async function main() {
   // x402 middleware — facilitator shares provider wallet for settlement
   const x402Middleware = createX402Middleware(x402Config, wallet);
 
-  const serviceEndpointUrl = `http://localhost:${PROVIDER_PORT}`;
-  const mcpEndpointUrl = `http://localhost:${MCP_PORT}/mcp`;
-  const a2aEndpointUrl = `http://localhost:${A2A_PORT}`;
+  // These URLs are written into the published profile and DID document — they
+  // tell *clients* where to reach this provider. In any non-localhost deploy
+  // (behind nginx / CF / NAT) the listen ports aren't externally addressable,
+  // so override via env. Fallback is the local listen address for same-host dev.
+  const serviceEndpointUrl = process.env.SERVICE_ENDPOINT_URL || `http://localhost:${PROVIDER_PORT}`;
+  const mcpEndpointUrl = process.env.MCP_ENDPOINT_URL || `http://localhost:${MCP_PORT}/mcp`;
+  const a2aEndpointUrl = process.env.A2A_ENDPOINT_URL || `http://localhost:${A2A_PORT}`;
 
   // ── Async service registry ────────────────────────────────────
   //
