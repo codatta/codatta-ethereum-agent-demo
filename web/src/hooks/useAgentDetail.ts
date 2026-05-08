@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import { parseAbi, decodeAbiParameters, decodeEventLog } from 'viem'
 import { addresses, deploymentBlock, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
-import { chunkedGetLogs } from '../lib/chunkedGetLogs'
+import { getCachedEvents } from '../lib/eventCache'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 
 export interface FeedbackRecord {
@@ -81,18 +81,22 @@ export function useAgentDetail(agentId: string | undefined) {
         } catch {}
 
         const latestBlock = await client!.getBlockNumber()
+        const chainId = client!.chain?.id ?? 0
 
         // Feedback events
         const feedbacks: FeedbackRecord[] = []
         try {
           const feedbackEvent = repAbi.find((x) => 'name' in x && x.name === 'NewFeedback')!
-          const logs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
-            client!.getLogs({
-              address: addresses.reputationRegistry,
-              event: feedbackEvent,
-              args: { agentId: id },
-              fromBlock: from, toBlock: to,
-            }),
+          const logs = await getCachedEvents(
+            `${chainId}:${addresses.reputationRegistry}:NewFeedback:${id}`,
+            deploymentBlock, latestBlock,
+            (from, to) =>
+              client!.getLogs({
+                address: addresses.reputationRegistry,
+                event: feedbackEvent,
+                args: { agentId: id },
+                fromBlock: from, toBlock: to,
+              }),
           )
           for (const log of logs) {
             const decoded = decodeEventLog({ abi: repAbi, data: log.data, topics: log.topics })
@@ -110,13 +114,16 @@ export function useAgentDetail(agentId: string | undefined) {
         try {
           const valAbi = parseAbi(validationRegistryAbi as unknown as string[])
           const reqEvent = valAbi.find((x) => 'name' in x && x.name === 'ValidationRequest')!
-          const reqLogs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
-            client!.getLogs({
-              address: addresses.validationRegistry,
-              event: reqEvent,
-              args: { agentId: id },
-              fromBlock: from, toBlock: to,
-            }),
+          const reqLogs = await getCachedEvents(
+            `${chainId}:${addresses.validationRegistry}:ValidationRequest:${id}`,
+            deploymentBlock, latestBlock,
+            (from, to) =>
+              client!.getLogs({
+                address: addresses.validationRegistry,
+                event: reqEvent,
+                args: { agentId: id },
+                fromBlock: from, toBlock: to,
+              }),
           )
           for (const log of reqLogs) {
             const decoded = decodeEventLog({ abi: valAbi, data: log.data, topics: log.topics })
