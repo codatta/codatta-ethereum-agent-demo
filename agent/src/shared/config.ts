@@ -28,6 +28,12 @@ export const addresses = {
 export const PROVIDER_PORT = parseInt(process.env.PROVIDER_PORT || "4021");
 export const INVITE_SERVICE_URL = process.env.INVITE_SERVICE_URL || "http://127.0.0.1:4060";
 
+// Lower bound for any historical event scan — sourced from deployment.json
+// via sync-env.sh so the runtime stays purely .env-driven. Defaults to 0
+// for legacy environments where the field hasn't been propagated yet
+// (chunked scanners still work, just slower on real chains).
+export const DEPLOYMENT_BLOCK = parseInt(process.env.DEPLOYMENT_BLOCK || "0");
+
 // x402 payment config
 export const X402_ENABLED = process.env.X402_ENABLED !== "false";
 export const USDC_PRICE_PER_IMAGE = parseFloat(process.env.USDC_PRICE_PER_IMAGE || "0.05");

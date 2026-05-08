@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAccount, usePublicClient, useWriteContract } from 'wagmi'
 import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toHex, hexToString } from 'viem'
-import { addresses, didRegistryAbi, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
+import { addresses, deploymentBlock, didRegistryAbi, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
 import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { useTasks } from '../hooks/useTasks'
+import { chunkedGetLogs } from '../lib/chunkedGetLogs'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 import { THEME, styles } from '../lib/theme'
 import { ENV, hexToDidUri, normalizeEndpoint } from '../config/env'
@@ -61,12 +62,15 @@ export function ProviderDashboard() {
         const valAbi = parseAbi(validationRegistryAbi as unknown as string[])
 
         // ── 1. Find ERC-8004 agents owned by this wallet ────────────
+        const latestBlock = await client!.getBlockNumber()
         const regEvent = identAbi.find(x => 'name' in x && x.name === 'Registered')!
-        const logs = await client!.getLogs({
-          address: addresses.identityRegistry,
-          event: regEvent,
-          fromBlock: 0n, toBlock: 'latest',
-        })
+        const logs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
+          client!.getLogs({
+            address: addresses.identityRegistry,
+            event: regEvent,
+            fromBlock: from, toBlock: to,
+          }),
+        )
 
         const myAgents: MyAgent[] = []
         const linkedDids = new Set<string>()
@@ -99,12 +103,14 @@ export function ProviderDashboard() {
           let validationCount = 0
           try {
             const valEvent = valAbi.find(x => 'name' in x && x.name === 'ValidationRequest')!
-            const valLogs = await client!.getLogs({
-              address: addresses.validationRegistry,
-              event: valEvent,
-              args: { agentId },
-              fromBlock: 0n, toBlock: 'latest',
-            })
+            const valLogs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
+              client!.getLogs({
+                address: addresses.validationRegistry,
+                event: valEvent,
+                args: { agentId },
+                fromBlock: from, toBlock: to,
+              }),
+            )
             validationCount = valLogs.length
           } catch {}
 

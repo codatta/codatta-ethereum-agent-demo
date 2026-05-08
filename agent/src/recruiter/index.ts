@@ -21,8 +21,9 @@ import {
   UserBuilder,
 } from "@a2a-js/sdk/server/express";
 import type { AgentCard } from "@a2a-js/sdk";
-import { provider, getWallet, addresses } from "../shared/config.js";
+import { provider, getWallet, addresses, DEPLOYMENT_BLOCK } from "../shared/config.js";
 import { IdentityRegistryABI, ReputationRegistryABI } from "../shared/abis.js";
+import { queryFilterChunked } from "../shared/events.js";
 import * as log from "../shared/logger.js";
 
 log.setRole("recruiter");
@@ -74,7 +75,7 @@ async function discoverAgents(): Promise<DiscoveredAgent[]> {
 
   // Get all Registered events
   const filter = identity.filters.Registered();
-  const events = await identity.queryFilter(filter);
+  const events = await queryFilterChunked(identity, filter, DEPLOYMENT_BLOCK);
   log.info(`Found ${events.length} registered agent(s) on-chain`);
 
   const candidates: DiscoveredAgent[] = [];

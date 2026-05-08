@@ -15,6 +15,7 @@ interface Deployment {
   reputationRegistry?: string;
   validationRegistry?: string;
   inviteRegistrar?: string;
+  deploymentBlock?: number;
 }
 
 let cached: Deployment | null = null;

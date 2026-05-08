@@ -8,6 +8,13 @@ export const addresses = {
   validationRegistry: deployment.validationRegistry as `0x${string}`,
 }
 
+// Lower bound for any historical event scan. Falls back to 0 for legacy
+// deployments that predate this field — fine on Anvil, slow but not fatal
+// on real chains thanks to the chunked getLogs helper.
+export const deploymentBlock: bigint = BigInt(
+  (deployment as { deploymentBlock?: number }).deploymentBlock ?? 0,
+)
+
 export const didRegistrarAbi = [
   'function register() external',
   'event DIDRegistered(uint128 identifier, address owner)',

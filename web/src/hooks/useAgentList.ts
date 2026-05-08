@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import { parseAbi, decodeEventLog, decodeAbiParameters, hexToString } from 'viem'
-import { addresses, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
+import { addresses, deploymentBlock, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
+import { chunkedGetLogs } from '../lib/chunkedGetLogs'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 
 export interface AgentSummary {
@@ -45,12 +46,16 @@ export function useAgentList() {
         const didAbi = parseAbi(didRegistryAbi as unknown as string[])
 
         // ── 1. Query ERC-8004 agents ────────────────────────────────
-        const identLogs = await client!.getLogs({
-          address: addresses.identityRegistry,
-          event: identAbi.find((x) => 'name' in x && x.name === 'Registered')!,
-          fromBlock: 0n,
-          toBlock: 'latest',
-        })
+        const latestBlock = await client!.getBlockNumber()
+        const registeredEvent = identAbi.find((x) => 'name' in x && x.name === 'Registered')!
+        const identLogs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
+          client!.getLogs({
+            address: addresses.identityRegistry,
+            event: registeredEvent,
+            fromBlock: from,
+            toBlock: to,
+          }),
+        )
 
         const results: AgentSummary[] = []
         const linkedDids = new Set<string>()
@@ -91,12 +96,15 @@ export function useAgentList() {
         }
 
         // ── 2. Query DID-only providers ─────────────────────────────
-        const didLogs = await client!.getLogs({
-          address: addresses.didRegistry,
-          event: didAbi.find((x) => 'name' in x && x.name === 'DIDRegistered')!,
-          fromBlock: 0n,
-          toBlock: 'latest',
-        })
+        const didRegisteredEvent = didAbi.find((x) => 'name' in x && x.name === 'DIDRegistered')!
+        const didLogs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
+          client!.getLogs({
+            address: addresses.didRegistry,
+            event: didRegisteredEvent,
+            fromBlock: from,
+            toBlock: to,
+          }),
+        )
 
         for (const log of didLogs) {
           const decoded = decodeEventLog({ abi: didAbi, data: log.data, topics: log.topics })

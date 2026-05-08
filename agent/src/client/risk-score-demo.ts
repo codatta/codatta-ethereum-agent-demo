@@ -15,7 +15,8 @@ import fs from "fs";
 import path from "path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { provider, addresses, INVITE_SERVICE_URL } from "../shared/config.js";
+import { provider, addresses, INVITE_SERVICE_URL, DEPLOYMENT_BLOCK } from "../shared/config.js";
+import { queryFilterChunked } from "../shared/events.js";
 import { IdentityRegistryABI } from "../shared/abis.js";
 import * as log from "../shared/logger.js";
 
@@ -83,7 +84,11 @@ async function discoverViaProfileService(): Promise<DiscoveredProvider | null> {
 }
 
 async function discoverViaERC8004(): Promise<DiscoveredProvider> {
-  const events = await identity.queryFilter(identity.filters.Registered());
+  const events = await queryFilterChunked(
+    identity,
+    identity.filters.Registered(),
+    DEPLOYMENT_BLOCK,
+  );
   for (let i = events.length - 1; i >= 0; i--) {
     const evt = events[i] as any;
     const id = BigInt(evt.args.agentId || evt.args[0]);

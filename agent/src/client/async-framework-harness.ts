@@ -36,8 +36,9 @@ import path from "path";
 import readline from "readline";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { provider, getWallet, addresses, hexToDidUri } from "../shared/config.js";
+import { provider, getWallet, addresses, hexToDidUri, DEPLOYMENT_BLOCK } from "../shared/config.js";
 import { IdentityRegistryABI, InviteRegistrarABI } from "../shared/abis.js";
+import { queryFilterChunked } from "../shared/events.js";
 import * as log from "../shared/logger.js";
 import { parseTextContent } from "../shared/mcp-content.js";
 
@@ -143,7 +144,11 @@ interface DiscoveredProvider {
 }
 
 async function discoverAsyncProvider(identity: ethers.Contract, excludeOwner: string): Promise<DiscoveredProvider> {
-  const events = await identity.queryFilter(identity.filters.Registered());
+  const events = await queryFilterChunked(
+    identity,
+    identity.filters.Registered(),
+    DEPLOYMENT_BLOCK,
+  );
   for (let i = events.length - 1; i >= 0; i--) {
     const evt = events[i] as any;
     const id = BigInt(evt.args.agentId || evt.args[0]);

@@ -155,7 +155,7 @@ const A2A_PORT = PROVIDER_PORT + 2;
 
 // ── Invite Service integration ──────────────────────────────────
 
-async function requestInviteCode(inviter: string, clientAddress: string): Promise<{ nonce: number; signature: string; inviteRegistrar: string } | null> {
+async function requestInviteCode(inviter: string, clientAddress: string): Promise<{ nonce: string; signature: string; inviteRegistrar: string } | null> {
   try {
     const res = await fetch(`${INVITE_SERVICE_URL}/generate`, {
       method: "POST",
@@ -163,7 +163,8 @@ async function requestInviteCode(inviter: string, clientAddress: string): Promis
       body: JSON.stringify({ inviter, clientAddress }),
     });
     if (!res.ok) return null;
-    return await res.json() as { nonce: number; signature: string; inviteRegistrar: string };
+    // nonce is a uint256 decimal string — random nonces don't fit in JS Number.
+    return await res.json() as { nonce: string; signature: string; inviteRegistrar: string };
   } catch {
     log.info("Invite Service unavailable, skipping invite");
     return null;
@@ -201,18 +202,43 @@ async function executeAnnotation(images: string[], task: string, labels?: string
 }
 
 async function updateValidation(agentId: bigint) {
-  const requestHash = ethers.keccak256(ethers.toUtf8Bytes(`annotation-${Date.now()}`));
+  const requestHash = ethers.keccak256(ethers.toUtf8Bytes(`annotation-${Date.now()}-${Math.random()}`));
   try {
-    await (await validationReg.validationRequest(
+    log.info(`[validation] request: hash=${requestHash.slice(0, 18)}..., agentId=${agentId.toString().slice(0, 12)}...`);
+    const reqTx = await validationReg.validationRequest(
       wallet.address, agentId,
       "ipfs://QmAnnotationResult", requestHash
-    )).wait();
-    await (await validationReg.validationResponse(
+    );
+    log.info(`[validation] request tx: ${reqTx.hash}`);
+    // Public RPCs (sepolia.base.org) load-balance across nodes that aren't
+    // strictly synced. Wait 2 confirmations so the next estimateGas hits a
+    // node that's caught up, then poll the storage slot directly to be sure.
+    const reqReceipt = await reqTx.wait(2);
+    log.info(`[validation] request receipt: status=${reqReceipt?.status}, block=${reqReceipt?.blockNumber}`);
+    if (reqReceipt?.status !== 1) {
+      log.info(`[validation] request reverted on-chain (status=${reqReceipt?.status}), skipping response`);
+      return;
+    }
+    // getValidationStatus reverts with "unknown" until the entry is visible
+    // on whichever node estimateGas hits — poll until it stops reverting.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        await validationReg.getValidationStatus(requestHash);
+        break; // entry visible
+      } catch {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+
+    const respTx = await validationReg.validationResponse(
       requestHash, 90,
       "ipfs://QmValidationReport",
       ethers.keccak256(ethers.toUtf8Bytes("validation-ok")),
       ethers.encodeBytes32String("annotation")
-    )).wait();
+    );
+    log.info(`[validation] response tx: ${respTx.hash}`);
+    const respReceipt = await respTx.wait();
+    log.info(`[validation] response receipt: status=${respReceipt?.status}`);
     log.info("Validation updated on-chain");
   } catch (e: any) {
     log.info("Validation update skipped:", e.message);
@@ -1067,6 +1093,55 @@ async function main() {
       if (userText.includes("invite") || userText.includes("register") || userText.includes("free") || userText.includes("yes")) {
         const dataPart = ctx.userMessage.parts?.find((p: any) => p.type === "data") as any;
         const clientAddress = dataPart?.data?.clientAddress || "";
+
+        // Returning-user shortcut — if clientAddress already owns a Codatta
+        // DID on-chain, skip invite issuance and tell client to go straight
+        // to annotation. The check is on-chain (DIDRegistry) so it survives
+        // any local invite-service-data wipe / redeploy where the DID stack
+        // is preserved (SKIP_DID mode).
+        if (clientAddress && /^0x[0-9a-fA-F]{40}$/.test(clientAddress)) {
+          try {
+            const owned = (await didRegistry.getOwnedDids(clientAddress)) as bigint[];
+            if (owned && owned.length > 0) {
+              const existingDid = owned[0];
+              const clientDid = hexToDidUri(existingDid.toString(16));
+              log.info(`A2A returning user: ${clientAddress.slice(0, 10)}... already has DID ${clientDid}`);
+              this.conversationState.set(contextKey, "returning");
+              eventBus.publish({
+                kind: "task",
+                id: ctx.taskId,
+                contextId: contextKey,
+                status: { state: "completed", timestamp: new Date().toISOString() },
+                history: [{
+                  role: "agent",
+                  messageId: `resp-${Date.now()}`,
+                  parts: [
+                    {
+                      type: "text",
+                      text: "Welcome back! You're already registered as a Codatta user. " +
+                        "Skipping invite — call the `annotate` MCP tool directly.",
+                    },
+                    {
+                      type: "data",
+                      data: {
+                        action: "returning-user",
+                        clientDid,
+                        mcpEndpoint: mcpEndpointUrl,
+                        // Demo doesn't track quota per DID; expose a placeholder
+                        // so client UX renders consistently.
+                        remainingQuota: 100,
+                      },
+                    },
+                  ],
+                }],
+              } as any);
+              eventBus.finished();
+              return;
+            }
+          } catch (e: any) {
+            log.info(`On-chain DID lookup failed (will issue fresh invite): ${e.message}`);
+          }
+        }
 
         // Request invite code from Invite Service
         const invite = await requestInviteCode(wallet.address, clientAddress);

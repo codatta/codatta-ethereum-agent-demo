@@ -16,29 +16,51 @@ contract Deploy is Script {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerKey);
 
+        // SKIP_DID=true → reuse existing DID stack (DIDRegistry + DIDRegistrar +
+        // InviteRegistrar already deployed elsewhere). Caller passes the three
+        // addresses via env. We do NOT touch updateRegistrars in this mode —
+        // assumes the existing DIDRegistry already has both registrars wired.
+        bool skipDid = vm.envOr("SKIP_DID", false);
+
         vm.startBroadcast(deployerKey);
 
-        // Codatta DID (UUPS proxy)
-        DIDRegistry didImpl = new DIDRegistry();
-        ERC1967Proxy didProxy = new ERC1967Proxy(
-            address(didImpl),
-            abi.encodeWithSelector(DIDRegistry.initialize.selector, deployer)
-        );
-        console.log("DIDRegistry (proxy):", address(didProxy));
+        address didRegistryAddr;
+        address didRegistrarAddr;
+        address inviteRegistrarAddr;
 
-        DIDRegistrar didRegistrar = new DIDRegistrar(address(didProxy));
-        console.log("DIDRegistrar:", address(didRegistrar));
+        if (skipDid) {
+            didRegistryAddr = vm.envAddress("DID_REGISTRY");
+            didRegistrarAddr = vm.envAddress("DID_REGISTRAR");
+            inviteRegistrarAddr = vm.envAddress("INVITE_REGISTRAR");
+            console.log("DIDRegistry (existing):", didRegistryAddr);
+            console.log("DIDRegistrar (existing):", didRegistrarAddr);
+            console.log("InviteRegistrar (existing):", inviteRegistrarAddr);
+        } else {
+            // Codatta DID (UUPS proxy)
+            DIDRegistry didImpl = new DIDRegistry();
+            ERC1967Proxy didProxy = new ERC1967Proxy(
+                address(didImpl),
+                abi.encodeWithSelector(DIDRegistry.initialize.selector, deployer)
+            );
+            didRegistryAddr = address(didProxy);
+            console.log("DIDRegistry (proxy):", didRegistryAddr);
 
-        // Invite Registrar (deployer is the invite signer for demo)
-        InviteRegistrar inviteRegistrar = new InviteRegistrar(address(didProxy), deployer);
-        console.log("InviteRegistrar:", address(inviteRegistrar));
+            DIDRegistrar didRegistrar = new DIDRegistrar(didRegistryAddr);
+            didRegistrarAddr = address(didRegistrar);
+            console.log("DIDRegistrar:", didRegistrarAddr);
 
-        // Authorize both registrars
-        address[] memory addings = new address[](2);
-        addings[0] = address(didRegistrar);
-        addings[1] = address(inviteRegistrar);
-        address[] memory removings = new address[](0);
-        DIDRegistry(address(didProxy)).updateRegistrars(addings, removings);
+            // Invite Registrar (deployer is the invite signer for demo)
+            InviteRegistrar inviteRegistrar = new InviteRegistrar(didRegistryAddr, deployer);
+            inviteRegistrarAddr = address(inviteRegistrar);
+            console.log("InviteRegistrar:", inviteRegistrarAddr);
+
+            // Authorize both registrars
+            address[] memory addings = new address[](2);
+            addings[0] = didRegistrarAddr;
+            addings[1] = inviteRegistrarAddr;
+            address[] memory removings = new address[](0);
+            DIDRegistry(didRegistryAddr).updateRegistrars(addings, removings);
+        }
 
         // ERC-8004
         IdentityRegistry identity = new IdentityRegistry();
@@ -61,20 +83,21 @@ contract Deploy is Script {
 
         vm.stopBroadcast();
 
-        // Write deployment addresses
+        // Write deployment addresses. `deploymentBlock` is the floor for any
+        // off-chain consumer that needs to backfill events (e.g. invite-service
+        // reconciling InviteRegistered nonces) — without it, RPC providers
+        // reject getLogs(0, latest) on real networks for being too wide.
         string memory obj = "d";
-        vm.serializeAddress(obj, "didRegistry", address(didProxy));
-        vm.serializeAddress(obj, "didRegistrar", address(didRegistrar));
-        vm.serializeAddress(obj, "inviteRegistrar", address(inviteRegistrar));
+        vm.serializeAddress(obj, "didRegistry", didRegistryAddr);
+        vm.serializeAddress(obj, "didRegistrar", didRegistrarAddr);
+        vm.serializeAddress(obj, "inviteRegistrar", inviteRegistrarAddr);
         vm.serializeAddress(obj, "identityRegistry", address(identity));
         vm.serializeAddress(obj, "reputationRegistry", address(reputation));
-        string memory result;
-        if (skipMockUsdc) {
-            result = vm.serializeAddress(obj, "validationRegistry", address(validation));
-        } else {
-            vm.serializeAddress(obj, "validationRegistry", address(validation));
-            result = vm.serializeAddress(obj, "mockUSDC", mockUSDC);
+        vm.serializeAddress(obj, "validationRegistry", address(validation));
+        if (!skipMockUsdc) {
+            vm.serializeAddress(obj, "mockUSDC", mockUSDC);
         }
+        string memory result = vm.serializeUint(obj, "deploymentBlock", block.number);
         vm.writeJson(result, "./script/deployment.json");
     }
 }
