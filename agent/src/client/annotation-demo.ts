@@ -30,6 +30,7 @@ import {
   IdentityRegistryABI, ReputationRegistryABI, DIDRegistryABI, InviteRegistrarABI,
 } from "../shared/abis.js";
 import * as log from "../shared/logger.js";
+import { parseTextContent } from "../shared/mcp-content.js";
 
 log.setRole("client");
 
@@ -289,8 +290,7 @@ async function main() {
         name: "annotate",
         arguments: { images, task: "object-detection", clientAddress: wallet.address, clientDid: inviteData.clientDid },
       });
-      const callText = callResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
-      const result: any = callText ? JSON.parse(callText.text) : {};
+      const result: any = parseTextContent(callResult.content) ?? {};
       if (result.status !== "completed") throw new Error(`Unexpected status: ${result.status}`);
 
       log.success(`Annotation received: ${result.annotations.length} images (${result.duration})`);
@@ -380,8 +380,7 @@ async function main() {
           clientAddress: wallet.address,
         },
       });
-      const callText = callResult.content.find((c): c is { type: "text"; text: string } => (c as any).type === "text");
-      const result: any = callText ? JSON.parse(callText.text) : {};
+      const result: any = parseTextContent(callResult.content) ?? {};
       if (result.status !== "completed") throw new Error(`Unexpected status: ${result.status}`);
 
       log.success(`Annotation received: ${result.annotations.length} images (${result.duration})`);

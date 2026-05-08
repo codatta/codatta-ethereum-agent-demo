@@ -43,9 +43,12 @@ const agentCard: AgentCard = {
     "Supports object-detection, segmentation, and classification. " +
     "Daily capacity: 5000 images.",
   url: `http://localhost:${EXT_PORT}`,
+  protocolVersion: "0.3.0",
   provider: { organization: "DataLabel Inc.", url: "https://datalabel.example" },
   version: "1.0.0",
   capabilities: { streaming: false, pushNotifications: false },
+  defaultInputModes: ["text/plain"],
+  defaultOutputModes: ["text/plain"],
   skills: [
     { id: "annotate", name: "Image Annotation", description: "Label images with bounding boxes, segmentation masks, or classes", tags: [] },
   ],
