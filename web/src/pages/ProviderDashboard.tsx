@@ -5,7 +5,7 @@ import { parseAbi, decodeEventLog, decodeAbiParameters, encodeAbiParameters, toH
 import { addresses, deploymentBlock, didRegistryAbi, identityRegistryAbi, reputationRegistryAbi, validationRegistryAbi } from '../config/contracts'
 import { useHiddenAgents } from '../hooks/useHiddenAgents'
 import { useTasks } from '../hooks/useTasks'
-import { chunkedGetLogs } from '../lib/chunkedGetLogs'
+import { getCachedEvents } from '../lib/eventCache'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 import { THEME, styles } from '../lib/theme'
 import { ENV, hexToDidUri, normalizeEndpoint } from '../config/env'
@@ -63,13 +63,17 @@ export function ProviderDashboard() {
 
         // ── 1. Find ERC-8004 agents owned by this wallet ────────────
         const latestBlock = await client!.getBlockNumber()
+        const chainId = client!.chain?.id ?? 0
         const regEvent = identAbi.find(x => 'name' in x && x.name === 'Registered')!
-        const logs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
-          client!.getLogs({
-            address: addresses.identityRegistry,
-            event: regEvent,
-            fromBlock: from, toBlock: to,
-          }),
+        const logs = await getCachedEvents(
+          `${chainId}:${addresses.identityRegistry}:Registered`,
+          deploymentBlock, latestBlock,
+          (from, to) =>
+            client!.getLogs({
+              address: addresses.identityRegistry,
+              event: regEvent,
+              fromBlock: from, toBlock: to,
+            }),
         )
 
         const myAgents: MyAgent[] = []
@@ -103,13 +107,16 @@ export function ProviderDashboard() {
           let validationCount = 0
           try {
             const valEvent = valAbi.find(x => 'name' in x && x.name === 'ValidationRequest')!
-            const valLogs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
-              client!.getLogs({
-                address: addresses.validationRegistry,
-                event: valEvent,
-                args: { agentId },
-                fromBlock: from, toBlock: to,
-              }),
+            const valLogs = await getCachedEvents(
+              `${chainId}:${addresses.validationRegistry}:ValidationRequest:${agentId}`,
+              deploymentBlock, latestBlock,
+              (from, to) =>
+                client!.getLogs({
+                  address: addresses.validationRegistry,
+                  event: valEvent,
+                  args: { agentId },
+                  fromBlock: from, toBlock: to,
+                }),
             )
             validationCount = valLogs.length
           } catch {}

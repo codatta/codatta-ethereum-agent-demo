@@ -213,8 +213,9 @@ async function generateInviteCode(inviter: string, clientAddress: string): Promi
 const SCAN_CHUNK_BLOCKS = 9_000;
 
 // How often to poll for new InviteRegistered events. Public RPCs are
-// rate-limited so going much faster than 5s is wasteful.
-const POLL_INTERVAL_MS = 5_000;
+// rate-limited and InviteRegistered is not latency-sensitive (claimed-state
+// is a UI hint), so 15s is a good balance — cuts getLogs traffic 3× vs 5s.
+const POLL_INTERVAL_MS = 15_000;
 
 function processInviteEvent(evt: ethers.EventLog | ethers.Log) {
   const args = (evt as ethers.EventLog).args;

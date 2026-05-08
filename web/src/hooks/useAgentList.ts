@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import { parseAbi, decodeEventLog, decodeAbiParameters, hexToString } from 'viem'
 import { addresses, deploymentBlock, didRegistryAbi, identityRegistryAbi } from '../config/contracts'
-import { chunkedGetLogs } from '../lib/chunkedGetLogs'
+import { getCachedEvents } from '../lib/eventCache'
 import { parseRegistrationFile, type RegistrationFile } from '../lib/parseRegistrationFile'
 
 export interface AgentSummary {
@@ -47,14 +47,18 @@ export function useAgentList() {
 
         // ── 1. Query ERC-8004 agents ────────────────────────────────
         const latestBlock = await client!.getBlockNumber()
+        const chainId = client!.chain?.id ?? 0
         const registeredEvent = identAbi.find((x) => 'name' in x && x.name === 'Registered')!
-        const identLogs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
-          client!.getLogs({
-            address: addresses.identityRegistry,
-            event: registeredEvent,
-            fromBlock: from,
-            toBlock: to,
-          }),
+        const identLogs = await getCachedEvents(
+          `${chainId}:${addresses.identityRegistry}:Registered`,
+          deploymentBlock, latestBlock,
+          (from, to) =>
+            client!.getLogs({
+              address: addresses.identityRegistry,
+              event: registeredEvent,
+              fromBlock: from,
+              toBlock: to,
+            }),
         )
 
         const results: AgentSummary[] = []
@@ -97,13 +101,16 @@ export function useAgentList() {
 
         // ── 2. Query DID-only providers ─────────────────────────────
         const didRegisteredEvent = didAbi.find((x) => 'name' in x && x.name === 'DIDRegistered')!
-        const didLogs = await chunkedGetLogs(deploymentBlock, latestBlock, (from, to) =>
-          client!.getLogs({
-            address: addresses.didRegistry,
-            event: didRegisteredEvent,
-            fromBlock: from,
-            toBlock: to,
-          }),
+        const didLogs = await getCachedEvents(
+          `${chainId}:${addresses.didRegistry}:DIDRegistered`,
+          deploymentBlock, latestBlock,
+          (from, to) =>
+            client!.getLogs({
+              address: addresses.didRegistry,
+              event: didRegisteredEvent,
+              fromBlock: from,
+              toBlock: to,
+            }),
         )
 
         for (const log of didLogs) {
